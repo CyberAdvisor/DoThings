@@ -3,9 +3,12 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Lists include tasks completed today (shown checked);
+  tasks carry their completion time. Update URLs can complete or reopen a task
+  and leave tags alone when a change has no tag list.
 - v0.1.5 (2026-11-07): Inbox, Upcoming, Anytime, Someday and Logbook now open in
   Things, so their queries, LOGBOOK_LIMIT and the constants only they used are
   removed. build_show_url opens either a task or one of those Things lists.
@@ -67,7 +70,7 @@ TASK_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
 # Things TMTask column values used by the queries (full list in CLAUDE_CONTEXT.md).
 TYPE_TODO = 0
-STATUS_OPEN = 0
+STATUS_OPEN, STATUS_COMPLETED = 0, 3
 START_ANYTIME, START_SOMEDAY = 1, 2
 
 # Lists Do Things shows itself: Today, then the custom searches.
@@ -162,7 +165,7 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 # Columns shared by every task query. Tags are concatenated with the ASCII unit
 # separator (char 31) because tag names may contain commas.
 _TASK_SELECT = f"""
-SELECT t.uuid, t.title, t.startDate, t.deadline,
+SELECT t.uuid, t.title, t.startDate, t.deadline, t.status, t.stopDate,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
@@ -179,11 +182,13 @@ WHERE t.type = {TYPE_TODO} AND t.trashed = 0 AND t.rt1_recurrenceRule IS NULL
 
 # A to-do keeps its own status and trashed flag when its project or heading is
 # trashed, completed or canceled, so the parents are checked too: trashed in
-# _TASK_SELECT (also used by read_task) and status here (every list in
-# APP_LISTS). A to-do with no project or heading counts as having an open,
-# untrashed parent.
-_OPEN_ONLY = (
-    f"t.status = {STATUS_OPEN} AND COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} "
+# _TASK_SELECT (also used by read_task) and status here. A to-do with no
+# project or heading counts as having an open, untrashed parent.
+# Every list shows open to-dos plus those completed since the start of today
+# (the `?` parameter, Unix time), which are shown checked until tomorrow.
+_ACTIVE = (
+    f"(t.status = {STATUS_OPEN} OR (t.status = {STATUS_COMPLETED} AND t.stopDate >= ?)) "
+    f"AND COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} "
     f"AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
     f"AND COALESCE(hp.status, {STATUS_OPEN}) = {STATUS_OPEN}"
 )
@@ -199,12 +204,14 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         start_date=unpack_things_date(row["startDate"]),
         deadline=unpack_things_date(row["deadline"]),
         context=row["context"] or "",
+        completed_at=row["stopDate"] if row["status"] == STATUS_COMPLETED else None,
     )
 
 
 def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, list, str]:
     """Return (where clause, params, order clause) for one of APP_LISTS.
 
+    The clause covers only what the list selects; read_list adds _ACTIVE.
     `today` is today's date in Things' packed format.
     """
     if name == "today":
@@ -214,26 +221,29 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
             deadline_clause += " AND t.deadlineSuppressionDate IS NULL"
         deadline_clause += ")"
         where = (
-            f"{_OPEN_ONLY} AND ((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
+            f"((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
             f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
         )
         return where, [today, today], "t.todayIndex, t.\"index\""
     if name in ("p1", "p2", "p3"):
         where = (
-            f"{_OPEN_ONLY} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
+            "EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
             "ON tg.uuid = tt.tags WHERE tt.tasks = t.uuid AND tg.title = ?)"
         )
         return where, [name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
     if name == "overdue":
-        where = f"{_OPEN_ONLY} AND t.deadline IS NOT NULL AND t.deadline < ?"
+        where = "t.deadline IS NOT NULL AND t.deadline < ?"
         return where, [today], "t.deadline, t.\"index\""
     raise ValueError(f"Unknown list: {name!r}")
 
 
 def read_list(conn: sqlite3.Connection, name: str, today: date) -> List[Task]:
-    """Return the to-dos in one of APP_LISTS, in display order."""
+    """Return the open and today-completed to-dos in one of APP_LISTS, in Things' order."""
     where, params, order = _list_query(conn, name, pack_things_date(today))
-    rows = conn.execute(f"{_TASK_SELECT} AND {where} ORDER BY {order}", params)
+    start_of_today = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+    rows = conn.execute(
+        f"{_TASK_SELECT} AND {_ACTIVE} AND ({where}) ORDER BY {order}", [start_of_today] + params
+    )
     return [_row_to_task(row) for row in rows]
 
 
@@ -263,15 +273,19 @@ def build_update_url(change: Change, token: str) -> str:
     Raises ValueError if a tag contains a comma, because the URL scheme uses
     commas to separate tags and the task's tags would be split incorrectly.
     """
-    if any("," in tag for tag in change.tags):
-        raise ValueError(f"Tag containing a comma cannot be written: {change.tags!r}")
-    params = {"id": change.task_id, "auth-token": token, "tags": ",".join(change.tags)}
+    params = {"id": change.task_id, "auth-token": token}
+    if change.tags is not None:
+        if any("," in tag for tag in change.tags):
+            raise ValueError(f"Tag containing a comma cannot be written: {change.tags!r}")
+        params["tags"] = ",".join(change.tags)
     if change.set_deadline is not None:
         params["deadline"] = change.set_deadline.isoformat()
     elif change.clear_deadline:
         params["deadline"] = ""  # An empty value clears the deadline.
     if change.set_start_date is not None:
         params["when"] = change.set_start_date.isoformat()
+    if change.set_completed is not None:
+        params["completed"] = "true" if change.set_completed else "false"
     return "things:///update?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe=",")
 
 

@@ -28,7 +28,7 @@ Do not weaken any of these without explicit approval:
 - **Never write to the Things database directly.** It is opened with `mode=ro`. All changes go through the URL scheme.
 - **Confirm before recording.** `apply_change` re-reads the task until `Change.is_satisfied_by` passes (5 s timeout). The order file is saved only after a move is confirmed.
 - **Stop on failure.** `apply_refresh_rules` stops at the first unconfirmed write in a refresh.
-- **Keep non-priority tags.** `tags=` replaces all tags, so every change carries the full tag list. Tags containing commas are refused, not split.
+- **Keep non-priority tags.** `tags=` replaces all tags, so every change that sets tags carries the full tag list (`Change.tags` None sends no `tags=` at all). Tags containing commas are refused, not split.
 - **Fail safe on bad data.** An unreadable date counts as no date (never overdue). An unreadable order or token file is logged and ignored.
 - **Local-only server.** Bound to `127.0.0.1`. The Host header must be the server's own address (blocks DNS rebinding). POSTs require the `X-Do-Things: 1` header (blocks cross-site requests). Task ids are validated before they reach a URL or `open`.
 - **Token secrecy.** `auth_token.txt` is mode 0600 and git-ignored. Never log a URL that contains the token.

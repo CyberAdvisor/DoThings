@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
+  completed tasks sorting last and being skipped by the refresh rules.
 - v0.1.5 (2026-11-07): Synchronized module version metadata.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
@@ -18,9 +20,11 @@ from priority_check import (
     Change,
     Task,
     apply_order,
+    completed_last,
     current_priority,
     deadline_state,
     group_today,
+    plan_completion,
     plan_move,
     plan_refresh,
     required_priority,
@@ -32,9 +36,12 @@ YESTERDAY = TODAY - timedelta(days=1)
 TOMORROW = TODAY + timedelta(days=1)
 
 
-def make_task(uuid: str = "A1", tags=None, deadline=None, start_date=None) -> Task:
+def make_task(uuid: str = "A1", tags=None, deadline=None, start_date=None, completed_at=None) -> Task:
     """Build a Today task for tests."""
-    return Task(uuid=uuid, title=uuid, tags=list(tags or []), deadline=deadline, start_date=start_date)
+    return Task(
+        uuid=uuid, title=uuid, tags=list(tags or []), deadline=deadline,
+        start_date=start_date, completed_at=completed_at,
+    )
 
 
 class RequiredPriorityTests(unittest.TestCase):
@@ -76,6 +83,46 @@ class PlanRefreshTests(unittest.TestCase):
 
     def test_overdue_p2_retagged_p1(self) -> None:
         self.assertEqual(plan_refresh(make_task(tags=["P2"], deadline=YESTERDAY), TODAY).tags, ["P1"])
+
+
+class CompletionTests(unittest.TestCase):
+    """Completing and reopening tasks."""
+
+    def test_refresh_skips_completed_tasks(self) -> None:
+        # Untagged and overdue: an open task would be retagged P1.
+        self.assertIsNone(plan_refresh(make_task(deadline=YESTERDAY, completed_at=100.0), TODAY))
+
+    def test_plan_completion_leaves_tags_and_dates_alone(self) -> None:
+        for completed in (True, False):
+            with self.subTest(completed=completed):
+                change = plan_completion(make_task(tags=["P2"], deadline=TODAY), completed)
+                self.assertEqual(change.set_completed, completed)
+                self.assertIsNone(change.tags)
+                self.assertIsNone(change.set_deadline)
+                self.assertFalse(change.clear_deadline)
+                self.assertIsNone(change.set_start_date)
+
+    def test_completion_confirmed_by_state_not_tags(self) -> None:
+        done = Change(task_id="A1", tags=None, set_completed=True)
+        self.assertTrue(done.is_satisfied_by(make_task(tags=["P3"], completed_at=100.0)))
+        self.assertFalse(done.is_satisfied_by(make_task(tags=["P3"])))
+        reopen = Change(task_id="A1", tags=None, set_completed=False)
+        self.assertTrue(reopen.is_satisfied_by(make_task(tags=["P3"])))
+        self.assertFalse(reopen.is_satisfied_by(make_task(tags=["P3"], completed_at=100.0)))
+
+    def test_completed_last_oldest_completion_first(self) -> None:
+        tasks = [
+            make_task("late", completed_at=300.0),
+            make_task("open1"),
+            make_task("early", completed_at=100.0),
+            make_task("open2"),
+        ]
+        self.assertEqual([t.uuid for t in completed_last(tasks)], ["open1", "open2", "early", "late"])
+
+    def test_group_today_puts_completed_last_despite_saved_order(self) -> None:
+        tasks = [make_task("done", tags=["P2"], completed_at=100.0), make_task("open", tags=["P2"])]
+        groups = group_today(tasks, {"P2": ["done", "open"]}, TODAY)
+        self.assertEqual([t.uuid for t in groups["P2"]], ["open", "done"])
 
 
 class PlanMoveTests(unittest.TestCase):

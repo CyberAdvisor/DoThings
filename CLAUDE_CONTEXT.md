@@ -42,6 +42,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
   - `rt1_recurrenceRule` is non-null on repeating templates, which are excluded.
 - Tags: `TMTaskTag(tasks, tags)` joins `TMTag(uuid, title)`. Tag titles are concatenated with `char(31)` because titles can contain commas.
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).
+- Every list shows open to-dos plus those completed since local midnight (`status` 3 and `stopDate` ≥ midnight; `stopDate` is Unix time). They come back as `Task.completed_at`, are sorted after open tasks (`completed_last`, oldest completion first), are skipped by the refresh rules, and can't be moved. Canceled to-dos are never shown.
 - Do Things only queries Today and the searches (`APP_LISTS`). Inbox, Upcoming, Anytime, Someday and Logbook open in Things with `things:///show?id=<list>` (no token needed).
 
 ## Things URL scheme gotchas
@@ -49,6 +50,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - Tags that don't exist in Things are silently ignored. That's why the P1–P3 tags must exist (the UI warns) and why every write is confirmed by re-reading the database.
 - A wrong auth token also fails silently. The only symptom is that the change never appears, which is reported as `write_failed`.
 - Unknown tags are dropped silently, so while P1, P2 or P3 is missing Do Things sends no writes (refresh skipped, moves to a missing priority refused with instructions). Otherwise a missing tag shows up as an unconfirmed write, which looks like a token problem.
+- `completed=true` / `completed=false` completes or reopens a to-do. `Change.tags` is None for these, so no `tags=` is sent and the tags are left alone.
 - `deadline=` with an empty value clears the deadline. `when=YYYY-MM-DD` sets the start date.
 - Commas between tags are sent unencoded and spaces as `%20`, matching Things' documented format.
 

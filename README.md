@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.6 (2026-11-07):** Every task in Today and the P1, P2, P3 and Overdue searches has a checkbox. Checking it completes the task in Things and shows it dim gray and struck through at the bottom of its group until the end of the day; unchecking reopens it. Warning messages after a failed move or check now stay visible.
 - **v0.1.5 (2026-11-07):** Inbox, Upcoming, Anytime, Someday and Logbook now open in Things instead of in Do Things (marked with an arrow in the sidebar). While a P tag is missing in Things, Do Things changes no tags and explains step by step how to create them, instead of reporting a token problem. The token warning now lists what to check, in order. Browser disconnects no longer print errors in Terminal or `errors.log`.
 - **v0.1.4 (2026-11-07):** Pushing a new version to `main` now creates its `vX.Y.Z` tag and GitHub release automatically, with the commit message as the release notes. `.gitignore` now also ignores Python's `__pycache__/` folder.
 - **v0.1.3 (2026-11-07):** Added the missing `.gitignore`, so the auth token, the saved task order and the logs can't be committed by accident.
@@ -25,6 +26,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
   - moving out of P1 removes its deadline, and if the task was in Today only because of its deadline (no start date, or one after today), sets its start date to today so it stays in Today;
   - moving between P2 and P3 leaves the deadline alone.
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
+- Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day. Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
 - Click a task to open it in Things for editing.
 - The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things.

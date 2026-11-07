@@ -2,12 +2,14 @@
 
 Prints where the Things database is, whether the columns Do Things relies on
 exist, whether the P1-P3 tags exist, and every Today task with its tags,
-dates, required priority and the change the refresh rules would make.
+dates, completion, required priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Today now includes tasks completed today; each is
+  printed with `completed=`.
 - v0.1.5 (2026-11-07): Synchronized module version metadata.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
@@ -80,7 +82,7 @@ def run() -> None:
         print(
             f"- {task.title!r} [{task.uuid}]\n"
             f"    tags={task.tags} start={task.start_date} deadline={task.deadline} "
-            f"context={task.context!r}\n"
+            f"context={task.context!r} completed={task.completed}\n"
             f"    required={required_priority(task, today)} planned={planned}"
         )
     print(f"\nDo Things v{PROJECT_VERSION} complete: diagnostic finished")

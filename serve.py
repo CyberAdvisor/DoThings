@@ -1,15 +1,19 @@
 """Do Things local server.
 
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
-reads Things, applies the priority rules, moves and reorders tasks, opens
+reads Things, applies the priority rules, moves, reorders, completes and
+reopens tasks, opens
 tasks and Things' own lists in Things, and stores the Things auth token on
 first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): New /api/complete completes or reopens a task (no P tags
+  needed). Lists include tasks completed today, sent with `completed` and
+  sorted after open tasks. Moving a completed task is refused.
 - v0.1.5 (2026-11-07): New /api/show-list opens Inbox, Upcoming, Anytime,
   Someday or Logbook in Things; /api/list serves only Today and the searches.
   While a P tag is missing in Things, refresh rules are skipped and a move to
@@ -60,8 +64,10 @@ from priority_check import (
     PRIORITIES,
     PRIORITY_LABELS,
     Task,
+    completed_last,
     deadline_state,
     group_today,
+    plan_completion,
     plan_move,
     plan_refresh,
     update_order,
@@ -97,6 +103,7 @@ def task_to_json(task: Task, today: date) -> Dict[str, Any]:
         "deadline_label": deadline_label(task.deadline, today),
         "deadline_state": deadline_state(task.deadline, today),
         "start_date": task.start_date.isoformat() if task.start_date else None,
+        "completed": task.completed,
     }
 
 
@@ -168,7 +175,7 @@ def list_response(name: str) -> Dict[str, Any]:
             for p in PRIORITIES
         ]
     else:
-        response["tasks"] = [task_to_json(t, today) for t in tasks]
+        response["tasks"] = [task_to_json(t, today) for t in completed_last(tasks)]
     return response
 
 
@@ -183,29 +190,54 @@ def parse_order(body: Dict[str, Any]) -> Tuple[str, List[str]]:
     return priority, ids
 
 
-def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Move a task to another priority, then save the new order once Things confirms."""
-    task_id = body.get("id")
+def load_task_for_write(task_id: object) -> Tuple[Task, str, str, List[str]]:
+    """Check a write request and return (task, token, db_path, missing P tags).
+
+    Raises an ApiError for a bad id, a missing token or an unknown task.
+    """
     if not is_valid_task_id(task_id):
         raise ApiError(400, "Invalid task id.")
-    priority, ids = parse_order(body)
     token = load_token()
     if token is None:
         raise ApiError(409, "The Things auth token is not set.")
     db_path = require_db_path()
-    today = today_local()
     with open_things_db(db_path) as conn:
         task = read_task(conn, task_id)
         missing = missing_priority_tags(conn)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
+    return task, token, db_path, missing
+
+
+def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Move a task to another priority, then save the new order once Things confirms."""
+    priority, ids = parse_order(body)
+    task, token, db_path, missing = load_task_for_write(body.get("id"))
+    if task.completed:
+        raise ApiError(409, "Uncheck the task before moving it.")
     if priority in missing:
         # Things would silently drop the unknown tag, so the move could never be confirmed.
         raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
-    if not apply_change(plan_move(task, priority, today), token, db_path):
+    if not apply_change(plan_move(task, priority, today_local()), token, db_path):
         # Order is only recorded after Things confirms the move.
         return {"ok": False, "write_failed": True}
     save_order(update_order(load_order(), priority, ids))
+    return {"ok": True}
+
+
+def complete_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Complete (`completed` true) or reopen a task in Things.
+
+    Needs no P tags, so it works even while a priority tag is missing.
+    """
+    completed = body.get("completed")
+    if not isinstance(completed, bool):
+        raise ApiError(400, "`completed` must be true or false.")
+    task, token, db_path, _ = load_task_for_write(body.get("id"))
+    if task.completed == completed:
+        return {"ok": True}  # Already in the requested state.
+    if not apply_change(plan_completion(task, completed), token, db_path):
+        return {"ok": False, "write_failed": True}
     return {"ok": True}
 
 
@@ -243,6 +275,7 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
 
 POST_ROUTES = {
     "/api/move": move_task,
+    "/api/complete": complete_task,
     "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,

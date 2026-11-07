@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
+  completed tasks in list responses.
 - v0.1.5 (2026-11-07): Initial release.
 """
 
@@ -14,11 +16,19 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
 import serve
-from common import START_ANYTIME, STATUS_OPEN, THINGS_LISTS, pack_things_date
+from common import (
+    LOCAL_TZ,
+    START_ANYTIME,
+    STATUS_COMPLETED,
+    STATUS_OPEN,
+    THINGS_LISTS,
+    pack_things_date,
+)
 from test_common import SCHEMA, TODAY
 
 
@@ -87,6 +97,65 @@ class MissingTagTests(MockThingsTestCase):
     def test_move_to_existing_tag_allowed(self) -> None:
         self.assertEqual(serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]}), {"ok": True})
         self.apply_change.assert_called_once()
+
+
+class CompletionTests(MockThingsTestCase):
+    """Completing and reopening tasks, and how completed tasks are listed."""
+
+    def add_completed_task(self, uuid: str) -> None:
+        """Add a P1-tagged Today task completed one minute after midnight."""
+        midnight = datetime.combine(TODAY, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, stopDate, "
+                "todayIndex, \"index\") VALUES (?, ?, 0, ?, 0, ?, ?, ?, -1, 0)",
+                (uuid, uuid, STATUS_COMPLETED, START_ANYTIME, pack_things_date(TODAY), midnight + 60),
+            )
+            conn.execute("INSERT INTO TMTaskTag VALUES (?, 't1')", (uuid,))
+
+    def test_complete_works_while_tags_missing(self) -> None:
+        self.assertEqual(serve.complete_task({"id": "task1", "completed": True}), {"ok": True})
+        change = self.apply_change.call_args[0][0]
+        self.assertTrue(change.set_completed)
+        self.assertIsNone(change.tags)
+
+    def test_reopen(self) -> None:
+        self.add_completed_task("done1")
+        serve.complete_task({"id": "done1", "completed": False})
+        self.assertFalse(self.apply_change.call_args[0][0].set_completed)
+
+    def test_no_write_when_already_in_state(self) -> None:
+        self.assertEqual(serve.complete_task({"id": "task1", "completed": False}), {"ok": True})
+        self.apply_change.assert_not_called()
+
+    def test_unconfirmed_completion_reported(self) -> None:
+        self.apply_change.return_value = False
+        self.assertEqual(
+            serve.complete_task({"id": "task1", "completed": True}), {"ok": False, "write_failed": True}
+        )
+
+    def test_bad_requests_rejected(self) -> None:
+        for body in ({"id": "task1", "completed": "yes"}, {"id": "bad id!", "completed": True},
+                     {"id": "nosuch", "completed": True}):
+            with self.subTest(body=body), self.assertRaises(serve.ApiError):
+                serve.complete_task(body)
+        self.apply_change.assert_not_called()
+
+    def test_completed_task_cannot_be_moved(self) -> None:
+        self.add_completed_task("done1")
+        with self.assertRaises(serve.ApiError) as raised:
+            serve.move_task({"id": "done1", "priority": "P1", "order": ["done1"]})
+        self.assertIn("Uncheck", raised.exception.message)
+
+    def test_completed_tasks_listed_last_and_flagged(self) -> None:
+        # done1 sorts first in Things (todayIndex -1) but must come after open tasks.
+        self.add_completed_task("done1")
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('task1', 't1')")
+        p1 = serve.list_response("p1")["tasks"]
+        self.assertEqual([(t["id"], t["completed"]) for t in p1], [("task1", False), ("done1", True)])
+        group = serve.list_response("today")["groups"][0]
+        self.assertEqual([t["id"] for t in group["tasks"]], ["task1", "done1"])
 
 
 class ListRoutingTests(MockThingsTestCase):

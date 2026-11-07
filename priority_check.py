@@ -2,11 +2,16 @@
 
 Pure logic with no I/O, so every rule can be unit-tested without Things.
 It decides which priority tag (P1, P2, P3) a task should carry, what changes a
-manual move implies, and how tasks are grouped and ordered for display.
+manual move implies, what completing or reopening a task implies, and how
+tasks are grouped and ordered for display.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Tasks carry `completed_at`. `plan_completion` builds a
+  complete/reopen change; `Change.tags` may be None (tags left alone). The
+  refresh rules skip completed tasks, and completed tasks sort after open ones
+  (oldest completion first) in Today groups and in the searches.
 - v0.1.5 (2026-11-07): Synchronized module version metadata.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
@@ -28,7 +33,7 @@ PRIORITY_LABELS = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up"}
 
 @dataclass
 class Task:
-    """An open or logged Things to-do, as read from the Things database."""
+    """An open or completed Things to-do, as read from the Things database."""
 
     uuid: str
     title: str
@@ -36,6 +41,12 @@ class Task:
     start_date: Optional[date] = None
     deadline: Optional[date] = None
     context: str = ""  # Project or area title, shown under the task title.
+    completed_at: Optional[float] = None  # Unix time it was completed; None while open.
+
+    @property
+    def completed(self) -> bool:
+        """True if the task is completed."""
+        return self.completed_at is not None
 
 
 @dataclass
@@ -43,20 +54,25 @@ class Change:
     """A write to send to Things for one task.
 
     `tags` is the complete tag list the task must end up with (the Things URL
-    scheme replaces all tags). Deadline handling is one of: leave alone,
-    set to `set_deadline`, or clear when `clear_deadline` is true. When
-    `set_start_date` is given, the task's start date is set to it.
+    scheme replaces all tags), or None to leave the tags alone. Deadline
+    handling is one of: leave alone, set to `set_deadline`, or clear when
+    `clear_deadline` is true. When `set_start_date` is given, the task's start
+    date is set to it. When `set_completed` is given, the task is completed
+    (True) or reopened (False).
     """
 
     task_id: str
-    tags: List[str]
+    tags: Optional[List[str]]
     set_deadline: Optional[date] = None
     clear_deadline: bool = False
     set_start_date: Optional[date] = None
+    set_completed: Optional[bool] = None
 
     def is_satisfied_by(self, task: Task) -> bool:
         """Return True when `task` (re-read from Things) reflects this change."""
-        if set(task.tags) != set(self.tags):
+        if self.tags is not None and set(task.tags) != set(self.tags):
+            return False
+        if self.set_completed is not None and task.completed != self.set_completed:
             return False
         if self.set_deadline is not None and task.deadline != self.set_deadline:
             return False
@@ -98,8 +114,10 @@ def _with_priority(tags: List[str], priority: str) -> List[str]:
 def plan_refresh(task: Task, today: date) -> Optional[Change]:
     """Return the tag change the refresh rules require, or None if compliant.
 
-    Refresh changes never touch the deadline.
+    Completed tasks are left as they are. Refresh changes never touch the deadline.
     """
+    if task.completed:
+        return None
     desired = _with_priority(task.tags, required_priority(task, today))
     if set(desired) == set(task.tags):
         return None
@@ -128,6 +146,14 @@ def plan_move(task: Task, destination: str, today: date) -> Change:
     return change
 
 
+def plan_completion(task: Task, completed: bool) -> Change:
+    """Return the change that completes (`completed` True) or reopens `task`.
+
+    Tags and dates are left alone, so a task reopens in the group it was in.
+    """
+    return Change(task_id=task.uuid, tags=None, set_completed=completed)
+
+
 def deadline_state(deadline: Optional[date], today: date) -> Optional[str]:
     """Classify a deadline as 'overdue', 'today' or 'future' (None if unset)."""
     if deadline is None:
@@ -144,14 +170,21 @@ def apply_order(tasks: List[Task], ids: List[str]) -> List[Task]:
     return sorted(tasks, key=lambda t: position.get(t.uuid, len(position)))
 
 
+def completed_last(tasks: List[Task]) -> List[Task]:
+    """Return open tasks in their given order, then completed tasks, oldest completion first."""
+    open_tasks = [t for t in tasks if not t.completed]
+    done = sorted((t for t in tasks if t.completed), key=lambda t: t.completed_at)
+    return open_tasks + done
+
+
 def group_today(
     tasks: List[Task], order: Dict[str, List[str]], today: date
 ) -> Dict[str, List[Task]]:
-    """Group Today tasks by priority, each group sorted by the saved order."""
+    """Group Today tasks by priority: open tasks in the saved order, then completed ones."""
     groups: Dict[str, List[Task]] = {p: [] for p in PRIORITIES}
     for task in tasks:
         groups[required_priority(task, today)].append(task)
-    return {p: apply_order(groups[p], order.get(p, [])) for p in PRIORITIES}
+    return {p: completed_last(apply_order(groups[p], order.get(p, []))) for p in PRIORITIES}
 
 
 def update_order(

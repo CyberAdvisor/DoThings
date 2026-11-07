@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.5
+  Version: 0.1.6
 
   Change log:
+  - v0.1.6 (2026-11-07): Checkbox on every task in Today and the searches.
+    Checking completes the task in Things, shows it dim gray and struck
+    through, and moves it to the bottom of its group; unchecking reopens it.
   - v0.1.5 (2026-11-07): Inbox, Upcoming, Anytime, Someday and Logbook open in
     Things (marked with an arrow). The missing-tags and token warnings, and the
     failed-move message, now give step-by-step fixes.
@@ -87,6 +90,17 @@
   }
   .task:hover { background: var(--hover); }
   .task.dragging { opacity: 0.4; }
+  /* Completion checkbox, round like Things. */
+  .check {
+    width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%; padding: 0;
+    border: 1.5px solid var(--muted); background: transparent; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .check svg { width: 10px; height: 10px; visibility: hidden; }
+  .task.done .check { background: var(--muted); border-color: var(--muted); }
+  .task.done .check svg { visibility: visible; }
+  .task.done { opacity: 0.55; }
+  .task.done .title { text-decoration: line-through; color: var(--muted); }
   .task .body { flex: 1; min-width: 0; }
   .task .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .task .context { color: var(--muted); font-size: 12px; }
@@ -127,6 +141,8 @@ const ICONS = {
   logbook: '<svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="4" fill="#3bb24f"/><path d="M6 10.3l2.6 2.6L14 7.5" stroke="#fff" stroke-width="2" fill="none"/></svg>',
   search: '<svg viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5" stroke="#8e8e93" stroke-width="2" fill="none"/><path d="M12.3 12.3L17 17" stroke="#8e8e93" stroke-width="2"/></svg>',
 };
+// Tick shown inside a checked checkbox.
+const TICK = '<svg viewBox="0 0 10 10"><path d="M2 5.2l2 2L8 3" stroke="#fff" stroke-width="1.6" fill="none"/></svg>';
 // Marks sidebar entries that open in Things instead of in Do Things.
 const OPENS_IN_THINGS = '<svg viewBox="0 0 12 12"><path d="M4 2h6v6M10 2L3 9" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
 const FLAG = '<svg viewBox="0 0 12 12"><path d="M2 1v10M2 1.5h7l-1.6 2.5L9 6.5H2" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>';
@@ -151,6 +167,7 @@ const state = {
   view: "list",   // "list" or "setup"
   busy: false,    // True while a move or reorder is being saved.
   drag: null,     // { id, from } while a task is being dragged.
+  status: "",     // Message above the list; kept across redraws until replaced.
   version: "",
 };
 
@@ -177,9 +194,11 @@ async function api(path, body) {
   return data;
 }
 
-/** Show a short message above the task list. */
+/** Show a short message above the task list; it stays until replaced or the list changes. */
 function setStatus(text) {
-  document.getElementById("status").textContent = text || "";
+  state.status = text || "";
+  const status = document.getElementById("status");
+  if (status) status.textContent = state.status;
 }
 
 // --- Sidebar ---------------------------------------------------------------
@@ -203,7 +222,7 @@ function renderSidebar() {
       item.title = "Opens in Things";
       item.onclick = () => showThingsList(entry.id);
     } else {
-      item.onclick = () => { state.list = entry.id; state.view = "list"; load(); };
+      item.onclick = () => { state.list = entry.id; state.view = "list"; setStatus(""); load(); };
     }
     nav.append(item);
   }
@@ -216,10 +235,20 @@ function renderSidebar() {
 
 // --- Task lists --------------------------------------------------------------
 
-/** Build one task row. Today rows are draggable between and within groups. */
+/** Build one task row. Open Today rows are draggable between and within groups. */
 function taskRow(task, priority) {
-  const row = el("div", "task");
+  const row = el("div", "task" + (task.completed ? " done" : ""));
   row.dataset.id = task.id;
+  const check = el("button", "check");
+  check.type = "button";
+  check.title = task.completed ? "Mark as not done" : "Mark as done";
+  check.setAttribute("aria-label", check.title);
+  check.innerHTML = TICK; // Static icon markup only.
+  check.onclick = (event) => {
+    event.stopPropagation(); // Checking a task must not open it in Things.
+    toggleComplete(row, task);
+  };
+  row.append(check);
   const body = el("div", "body");
   body.append(el("div", "title", task.title || "New To-Do"));
   if (task.context) body.append(el("div", "context", task.context));
@@ -232,7 +261,7 @@ function taskRow(task, priority) {
     row.append(flag);
   }
   row.onclick = () => openTask(task.id);
-  if (priority) {
+  if (priority && !task.completed) {
     row.draggable = true;
     row.addEventListener("dragstart", (event) => {
       state.drag = { id: task.id, from: priority };
@@ -274,6 +303,11 @@ const WRITE_FAILED_STEPS = [
   "The token matches: click Manage there, copy the token, then click Update token.",
 ];
 
+/** One-line status message for a change (e.g. "the move") that Things didn't apply. */
+function writeFailedMessage(what) {
+  return `Things didn't apply ${what}. Check: ` + WRITE_FAILED_STEPS.map((s, i) => `${i + 1}. ${s}`).join(" ");
+}
+
 /** Add warnings about missing tags or an unconfirmed write. */
 function renderBanners(content, data) {
   if (data.missing_tags && data.missing_tags.length) {
@@ -301,7 +335,7 @@ function renderList(data) {
   content.replaceChildren();
   renderHeader(content, LISTS.find((l) => l && l.id === data.name));
   renderBanners(content, data);
-  const status = el("div", "status");
+  const status = el("div", "status", state.status);
   status.id = "status";
   content.append(status);
   if (data.groups) {
@@ -381,14 +415,35 @@ async function dropTask(zone, clientY) {
     const result = from === to
       ? await api("/api/order", { priority: to, order: ids })
       : await api("/api/move", { id, priority: to, order: ids });
-    if (!result.ok) {
-      setStatus("Things didn't apply the move. Check: " + WRITE_FAILED_STEPS.map((s, i) => `${i + 1}. ${s}`).join(" "));
-    }
+    setStatus(result.ok ? "" : writeFailedMessage("the move"));
   } catch (error) {
     setStatus(error.message);
   } finally {
     state.busy = false;
     load();
+  }
+}
+
+/**
+ * Complete or reopen a task. The row changes right away (checked rows move to
+ * the bottom of their group); if Things doesn't confirm, the reload puts it back.
+ */
+async function toggleComplete(row, task) {
+  if (state.busy) return;
+  const completed = !task.completed;
+  state.busy = true;
+  row.classList.toggle("done", completed);
+  row.draggable = false;
+  if (completed) row.parentNode.append(row);
+  setStatus(completed ? "Marking done…" : "Marking not done…");
+  try {
+    const result = await api("/api/complete", { id: task.id, completed });
+    setStatus(result.ok ? "" : writeFailedMessage("the change"));
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    state.busy = false;
+    load(); // Redraw from Things, in its confirmed state and order.
   }
 }
 

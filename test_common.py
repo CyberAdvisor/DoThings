@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.5
+Version: 0.1.6
 
 Change log:
+- v0.1.6 (2026-11-07): Tests for tasks completed today appearing in the lists
+  (and earlier or canceled ones not), and for complete/reopen URLs.
 - v0.1.5 (2026-11-07): Dropped tests for the lists that now open in Things;
   Things schema values not used by common.py are defined here; test for
   opening a Things list by URL.
@@ -23,11 +25,13 @@ import stat
 import tempfile
 import unittest
 import urllib.parse
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from common import (
+    LOCAL_TZ,
     START_ANYTIME,
     START_SOMEDAY,
+    STATUS_COMPLETED,
     STATUS_OPEN,
     THINGS_LISTS,
     build_show_url,
@@ -51,7 +55,7 @@ TODAY = date(2026, 11, 7)
 
 # Things values the mock data needs that common.py's queries don't use.
 START_INBOX = 0
-STATUS_CANCELED, STATUS_COMPLETED = 2, 3
+STATUS_CANCELED = 2
 
 SCHEMA = """
 CREATE TABLE TMTask (
@@ -130,6 +134,13 @@ class UrlTests(unittest.TestCase):
         params = self._params(build_update_url(change, "t"))
         self.assertEqual(params["when"], ["2026-11-07"])
         self.assertEqual(params["deadline"], [""])
+
+    def test_complete_and_reopen_leave_tags_alone(self) -> None:
+        for completed, value in ((True, "true"), (False, "false")):
+            with self.subTest(completed=completed):
+                params = self._params(build_update_url(Change("A1", None, set_completed=completed), "t"))
+                self.assertEqual(params["completed"], [value])
+                self.assertNotIn("tags", params)
 
     def test_update_leaves_deadline(self) -> None:
         params = self._params(build_update_url(Change("A1", ["P2"]), "t"))
@@ -243,6 +254,32 @@ class DatabaseTests(unittest.TestCase):
     def _ids(self, name: str) -> list:
         with open_things_db(self.path) as conn:
             return [t.uuid for t in read_list(conn, name, TODAY)]
+
+    def test_completed_today_listed_earlier_and_canceled_not(self) -> None:
+        midnight = datetime.combine(TODAY, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+        started = pack_things_date(TODAY)
+        rows = [
+            # uuid, status, stopDate
+            ("done_today", STATUS_COMPLETED, midnight + 60),
+            ("done_yesterday", STATUS_COMPLETED, midnight - 60),
+            ("canceled_today", STATUS_CANCELED, midnight + 60),
+        ]
+        with sqlite3.connect(self.path) as conn:
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, deadline, "
+                f"stopDate, todayIndex, \"index\") VALUES (?, ?, 0, ?, 0, {START_ANYTIME}, ?, ?, ?, 9, 0)",
+                [(uuid, uuid, status, started, started, stop) for uuid, status, stop in rows],
+            )
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 't1')", [(r[0],) for r in rows])
+        for name in ("today", "p1"):
+            with self.subTest(name=name):
+                ids = self._ids(name)
+                self.assertIn("done_today", ids)
+                self.assertNotIn("done_yesterday", ids)
+                self.assertNotIn("canceled_today", ids)
+        with open_things_db(self.path) as conn:
+            self.assertEqual(read_task(conn, "done_today").completed_at, midnight + 60)
+            self.assertIsNone(read_task(conn, "today1").completed_at)
 
     def test_today_membership_and_order(self) -> None:
         self.assertEqual(self._ids("today"), ["today2", "today1", "overdue"])
