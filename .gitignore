@@ -1,0 +1,11 @@
+# Runtime logs
+*.log
+
+# Local runtime state
+task_order.json
+
+# Things auth token (secret)
+auth_token.txt
+
+# macOS
+.DS_Store
