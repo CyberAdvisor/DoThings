@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.10
+Version: 0.1.11
 
 Change log:
+- v0.1.11 (2026-11-07): Test for hiding completed tasks.
 - v0.1.10 (2026-11-07): Tests for sidebar counts in list responses and
   checklist progress in the task detail.
 - v0.1.9 (2026-11-07): Test that a refresh gives an undated task due today a
@@ -185,6 +186,19 @@ class CompletionTests(MockThingsTestCase):
             with self.subTest(body=body), self.assertRaises(serve.ApiError):
                 serve.complete_task(body)
         self.apply_change.assert_not_called()
+
+    def test_hide_completed(self) -> None:
+        self.add_completed_task("done1")
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('task1', 't1')")
+        for name in ("today", "p1"):
+            with self.subTest(name=name):
+                shown = serve.list_response(name)
+                hidden = serve.list_response(name, hide_completed=True)
+                ids = lambda r: [t["id"] for t in (r["groups"][0]["tasks"] if "groups" in r else r["tasks"])]
+                self.assertEqual(ids(shown), ["task1", "done1"])
+                self.assertEqual(ids(hidden), ["task1"])
+                self.assertEqual(hidden["counts"], shown["counts"])
 
     def test_completed_task_cannot_be_moved(self) -> None:
         self.add_completed_task("done1")

@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.10
+Version: 0.1.11
 
 Change log:
+- v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): count_inbox for the sidebar; read_checklist_progress
   for the editor's checklist indicator.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.

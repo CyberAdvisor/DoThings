@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.11 (2026-11-07):** A **Hide Completed** checkbox under the searches hides tasks checked off today in every view; unchecking it shows them again. The setting is remembered in your browser.
 - **v0.1.10 (2026-11-07):** The sidebar shows counts like Things: the number of Inbox items, and for Today a red badge of tasks due today or overdue plus the total open. The editor shows a task's checklist progress (e.g. "Checklist: 1 of 3 done") next to Open in Things.
 - **v0.1.9 (2026-11-07):** A task with no start date (in the Inbox, Anytime or Someday) that is due today or overdue now gets a start date of today on the next refresh, so it is in Things' own Today too. In the editor, choosing Someday or Anytime for When also removes the deadline.
 - **v0.1.8 (2026-11-07):** When and Deadline open a date picker in the editor: a calendar plus Today, Someday and Anytime (When) or Today and Clear (Deadline). Copies of repeating to-dos are no longer locked; their When and deadline can be changed like any task.
@@ -31,7 +32,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
   - moving out of P1 removes its deadline, and if the task was in Today only because of its deadline (no start date, or one after today), sets its start date to today so it stays in Today;
   - moving between P2 and P3 leaves the deadline alone.
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
-- Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day. Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
+- Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day (tick **Hide Completed** under the searches to hide these everywhere; the setting is remembered). Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
 - Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar; choosing Someday or Anytime also removes the deadline), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things; if the task has a checklist, its progress is shown beside it (edit the checklist in Things). While a card is open, the list doesn't refresh and tasks can't be dragged.
 - The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things. As in Things, Inbox shows its item count and Today shows a red badge of tasks due today or overdue followed by the number of open tasks.

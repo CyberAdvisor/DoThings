@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.10
+  Version: 0.1.11
 
   Change log:
+  - v0.1.11 (2026-11-07): "Hide Completed" checkbox under the searches hides
+    tasks checked off today in every view; remembered in this browser.
   - v0.1.10 (2026-11-07): Sidebar counts as in Things: Inbox items, and for
     Today a red badge of tasks due today or overdue plus the open total. The
     editor shows checklist progress next to Open in Things.
@@ -76,6 +78,7 @@
     border-radius: 9px; padding: 0 6px; min-width: 8px; text-align: center;
   }
   .nav-item .opens-things { color: var(--muted); }
+  .nav-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
   .nav-item .opens-things svg { width: 12px; height: 12px; }
   .nav-footer { margin-top: auto; padding: 8px 10px; color: var(--muted); font-size: 12px; }
   .nav-footer a { color: var(--muted); cursor: pointer; text-decoration: underline; }
@@ -239,10 +242,30 @@ const state = {
   status: "",     // Message above the list; kept across redraws until replaced.
   edit: null,     // The open inline editor (see startEdit), or null.
   counts: null,   // Sidebar counts from the last list response: {inbox, today: {open, due}}.
+  hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
   version: "",
 };
 
 // --- Helpers ---------------------------------------------------------------
+
+/** Read a saved setting from this browser, or `fallback` if none or storage is unavailable. */
+function loadSetting(key, fallback) {
+  try {
+    const value = window.localStorage.getItem(`dothings.${key}`);
+    return value === null ? fallback : JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+/** Save a setting in this browser; it is simply not remembered if storage is unavailable. */
+function saveSetting(key, value) {
+  try {
+    window.localStorage.setItem(`dothings.${key}`, JSON.stringify(value));
+  } catch (error) {
+    // Storage blocked or full: the setting still applies until the page is reloaded.
+  }
+}
 
 /** Create an element with optional class and text (text is never parsed as HTML). */
 function el(tag, className, text) {
@@ -301,6 +324,17 @@ function renderSidebar() {
     }
     nav.append(item);
   }
+  const option = el("label", "nav-option");
+  const hide = el("input");
+  hide.type = "checkbox";
+  hide.checked = state.hideCompleted;
+  hide.onchange = () => {
+    state.hideCompleted = hide.checked;
+    saveSetting("hideCompleted", hide.checked);
+    load();
+  };
+  option.append(hide, el("span", "", "Hide Completed"));
+  nav.append(option);
   const footer = el("div", "nav-footer");
   const link = el("a", "", "Things auth token…");
   link.onclick = () => showSetup(false);
@@ -1002,7 +1036,8 @@ async function load() {
   if (state.busy || state.drag || state.edit || state.view === "setup") return;
   renderSidebar();
   try {
-    const data = await api(`/api/list?name=${encodeURIComponent(state.list)}`);
+    const hide = state.hideCompleted ? "&hide_completed=1" : "";
+    const data = await api(`/api/list?name=${encodeURIComponent(state.list)}${hide}`);
     if (!data.token_set) { showSetup(true); return; }
     state.counts = data.counts;
     renderSidebar(); // Again, now with the fresh counts.

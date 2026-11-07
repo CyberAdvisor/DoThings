@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.10
+Version: 0.1.11
 
 Change log:
+- v0.1.11 (2026-11-07): /api/list takes `hide_completed=1` to leave out
+  tasks completed today (the sidebar counts are unaffected).
 - v0.1.10 (2026-11-07): List responses include sidebar counts (Inbox; Today
   open and due/overdue). The task detail includes checklist progress.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.
@@ -168,10 +170,11 @@ def apply_refresh_rules(
     return False
 
 
-def list_response(name: str) -> Dict[str, Any]:
+def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
     """Build the JSON for Today or a search, applying the refresh rules first.
 
-    Every response also carries the sidebar counts, so they stay current.
+    With `hide_completed`, tasks completed today are left out. Every response
+    also carries the sidebar counts, so they stay current.
     """
     if name not in APP_LISTS:
         raise ApiError(404, f"Unknown list: {name}")
@@ -185,6 +188,8 @@ def list_response(name: str) -> Dict[str, Any]:
         tasks = read_list(conn, name, today)
         today_tasks = tasks if name == "today" else read_list(conn, "today", today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
+    if hide_completed:
+        tasks = [t for t in tasks if not t.completed]
     response: Dict[str, Any] = {
         "name": name,
         "token_set": token is not None,
@@ -463,8 +468,10 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/status":
             self._send_json(200, {"version": PROJECT_VERSION, "token_set": load_token() is not None})
         elif path == "/api/list":
-            name = urllib.parse.parse_qs(query).get("name", [""])[0]
-            self._run(lambda: list_response(name))
+            params = urllib.parse.parse_qs(query)
+            name = params.get("name", [""])[0]
+            hide_completed = params.get("hide_completed", [""])[0] == "1"
+            self._run(lambda: list_response(name, hide_completed))
         elif path == "/api/task":
             task_id = urllib.parse.parse_qs(query).get("id", [""])[0]
             self._run(lambda: task_detail(task_id))

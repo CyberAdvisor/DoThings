@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.10
+Version: 0.1.11
 
 Change log:
+- v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): Test for today_counts.
 - v0.1.9 (2026-11-07): Tests for the start-date refresh rule and for Someday
   and Anytime clearing the deadline.

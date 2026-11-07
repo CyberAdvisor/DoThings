@@ -44,6 +44,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
   - `todayIndex` gives the Today order.
   - `rt1_recurrenceRule` is non-null on repeating templates, which are excluded.
 - Checklists: `TMChecklistItem(task, status)`; status other than 0 (completed or canceled) counts as done. Shown read-only as progress in the editor.
+- "Hide Completed" (sidebar checkbox, saved in the browser's localStorage as `dothings.hideCompleted`) adds `hide_completed=1` to `/api/list`, which drops today's completed tasks from the list but not from the counts.
 - Sidebar counts come with every list response: Inbox = open, untrashed to-dos with `start` 0; Today = open Today tasks, and the red badge = those due today or overdue (`today_counts`).
 - Tags: `TMTaskTag(tasks, tags)` joins `TMTag(uuid, title)`. Tag titles are concatenated with `char(31)` because titles can contain commas.
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).

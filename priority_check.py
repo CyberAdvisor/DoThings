@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.10
+Version: 0.1.11
 
 Change log:
+- v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): `today_counts` gives the sidebar's Today counts.
 - v0.1.9 (2026-11-07): New refresh rule: a task with no start date (Inbox,
   Anytime or Someday) due today or overdue gets a start date of today.
