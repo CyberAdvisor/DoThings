@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<!--
+  Do Things page. Served by serve.py; all rules and data live on the server,
+  this page only renders lists and sends actions.
+
+  Version: 0.1.1
+
+  Change log:
+  - v0.1.1 (2026-11-07): Synchronized module version metadata.
+  - v0.1.0 (2026-11-07): Initial release.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Do Things</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #ffffff; --sidebar: #f4f4f6; --text: #1d1d1f; --muted: #8a8a8e;
+    --line: #e6e6e9; --hover: #eef0f4; --selected: #dfe3ea; --accent: #2f6fe4;
+    --red: #e5484d; --pill: #eceef1; --banner: #fff4e5; --banner-text: #8a4b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1f22; --sidebar: #26272b; --text: #ececee; --muted: #8e8e93;
+      --line: #34353a; --hover: #2e3035; --selected: #3a3d44; --accent: #5b8cff;
+      --red: #ff6369; --pill: #34363b; --banner: #3a2e1c; --banner-text: #ffc879;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex; background: var(--bg); color: var(--text);
+    font: 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  }
+  /* Sidebar */
+  nav {
+    width: 240px; flex-shrink: 0; background: var(--sidebar); padding: 20px 10px;
+    display: flex; flex-direction: column; border-right: 1px solid var(--line);
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px; padding: 5px 10px; border-radius: 6px;
+    cursor: pointer; user-select: none;
+  }
+  .nav-item:hover { background: var(--hover); }
+  .nav-item.selected { background: var(--selected); }
+  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+  .nav-gap { height: 14px; }
+  .nav-heading { color: var(--muted); font-size: 12px; font-weight: 600; padding: 4px 10px; }
+  .nav-footer { margin-top: auto; padding: 8px 10px; color: var(--muted); font-size: 12px; }
+  .nav-footer a { color: var(--muted); cursor: pointer; text-decoration: underline; }
+  /* Main area */
+  main { flex: 1; overflow-y: auto; padding: 36px 48px 80px; }
+  .content { max-width: 720px; margin: 0 auto; }
+  h1 { display: flex; align-items: center; gap: 10px; font-size: 26px; margin: 0 0 22px; }
+  h1 svg { width: 26px; height: 26px; }
+  .banner {
+    background: var(--banner); color: var(--banner-text); border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 16px;
+  }
+  .banner button { margin-left: 8px; }
+  .status { color: var(--muted); font-size: 12px; min-height: 18px; margin-bottom: 4px; }
+  /* Priority groups */
+  section.group { margin-bottom: 26px; }
+  section.group h2 {
+    font-size: 15px; margin: 0 0 4px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  section.group h2 .tag { color: var(--muted); font-weight: 500; font-size: 12px; }
+  .drop-zone { min-height: 34px; padding: 2px 0; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 10px; }
+  /* Task rows */
+  .task {
+    display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px;
+    cursor: pointer;
+  }
+  .task:hover { background: var(--hover); }
+  .task.dragging { opacity: 0.4; }
+  .task .body { flex: 1; min-width: 0; }
+  .task .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .task .context { color: var(--muted); font-size: 12px; }
+  .pill { background: var(--pill); color: var(--muted); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+  .deadline { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .deadline.overdue { color: var(--red); }
+  .deadline svg { width: 12px; height: 12px; }
+  .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
+  /* Setup screen */
+  .setup p { color: var(--muted); }
+  .setup ol { padding-left: 20px; }
+  .setup input {
+    width: 100%; font: inherit; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text); margin: 6px 0 10px;
+  }
+  button {
+    font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button.secondary { background: transparent; color: var(--text); }
+  .error { color: var(--red); }
+</style>
+</head>
+<body>
+<nav id="sidebar"></nav>
+<main><div class="content" id="content"></div></main>
+
+<script>
+"use strict";
+
+// Sidebar entries: Things' built-in lists, then the custom searches.
+const ICONS = {
+  inbox: '<svg viewBox="0 0 20 20"><rect x="2" y="3" width="16" height="14" rx="3" fill="#3a8ef6"/><path d="M5 11h3l1 2h2l1-2h3" stroke="#fff" stroke-width="1.6" fill="none"/></svg>',
+  today: '<svg viewBox="0 0 20 20"><path d="M10 1.8l2.5 5.2 5.7.8-4.1 4 1 5.6L10 14.7l-5.1 2.7 1-5.6-4.1-4 5.7-.8z" fill="#f5c400"/></svg>',
+  upcoming: '<svg viewBox="0 0 20 20"><rect x="2" y="3" width="16" height="15" rx="3" fill="#e5484d"/><rect x="4" y="7" width="12" height="9" rx="1" fill="#fff"/></svg>',
+  anytime: '<svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="4" rx="1.5" fill="#2bb5a5"/><rect x="3" y="8.5" width="14" height="4" rx="1.5" fill="#2bb5a5" opacity=".75"/><rect x="3" y="14" width="14" height="4" rx="1.5" fill="#2bb5a5" opacity=".5"/></svg>',
+  someday: '<svg viewBox="0 0 20 20"><rect x="2" y="4" width="16" height="4" rx="1" fill="#c9a86a"/><rect x="3" y="8" width="14" height="9" rx="1.5" fill="#dcc08c"/><rect x="7.5" y="10" width="5" height="1.6" rx=".8" fill="#fff"/></svg>',
+  logbook: '<svg viewBox="0 0 20 20"><rect x="2" y="2" width="16" height="16" rx="4" fill="#3bb24f"/><path d="M6 10.3l2.6 2.6L14 7.5" stroke="#fff" stroke-width="2" fill="none"/></svg>',
+  search: '<svg viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5" stroke="#8e8e93" stroke-width="2" fill="none"/><path d="M12.3 12.3L17 17" stroke="#8e8e93" stroke-width="2"/></svg>',
+};
+const FLAG = '<svg viewBox="0 0 12 12"><path d="M2 1v10M2 1.5h7l-1.6 2.5L9 6.5H2" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>';
+const LISTS = [
+  { id: "inbox", name: "Inbox", icon: "inbox" },
+  { id: "today", name: "Today", icon: "today" },
+  { id: "upcoming", name: "Upcoming", icon: "upcoming" },
+  { id: "anytime", name: "Anytime", icon: "anytime" },
+  { id: "someday", name: "Someday", icon: "someday" },
+  { id: "logbook", name: "Logbook", icon: "logbook" },
+  null, // Gap before the custom searches.
+  { id: "p1", name: "P1 · Due Today", icon: "search" },
+  { id: "p2", name: "P2 · To Do", icon: "search" },
+  { id: "p3", name: "P3 · Follow Up", icon: "search" },
+  { id: "overdue", name: "Overdue", icon: "search" },
+];
+const REFRESH_MS = 60000;
+
+const state = {
+  list: "today",
+  view: "list",   // "list" or "setup"
+  busy: false,    // True while a move or reorder is being saved.
+  drag: null,     // { id, from } while a task is being dragged.
+  version: "",
+};
+
+// --- Helpers ---------------------------------------------------------------
+
+/** Create an element with optional class and text (text is never parsed as HTML). */
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** Call the local API. The X-Do-Things header is required by the server on writes. */
+async function api(path, body) {
+  const options = body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Do-Things": "1" },
+    body: JSON.stringify(body),
+  };
+  const response = await fetch(path, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  return data;
+}
+
+/** Show a short message above the task list. */
+function setStatus(text) {
+  document.getElementById("status").textContent = text || "";
+}
+
+// --- Sidebar ---------------------------------------------------------------
+
+/** Draw the sidebar, highlighting the current list. */
+function renderSidebar() {
+  const nav = document.getElementById("sidebar");
+  nav.replaceChildren();
+  for (const entry of LISTS) {
+    if (entry === null) {
+      nav.append(el("div", "nav-gap"), el("div", "nav-heading", "Searches"));
+      continue;
+    }
+    const item = el("div", "nav-item" + (state.view === "list" && state.list === entry.id ? " selected" : ""));
+    item.innerHTML = ICONS[entry.icon]; // Static icon markup only.
+    item.append(el("span", "", entry.name));
+    item.onclick = () => { state.list = entry.id; state.view = "list"; load(); };
+    nav.append(item);
+  }
+  const footer = el("div", "nav-footer");
+  const link = el("a", "", "Things auth token…");
+  link.onclick = () => showSetup(false);
+  footer.append(link, el("div", "", state.version ? `Do Things v${state.version}` : ""));
+  nav.append(footer);
+}
+
+// --- Task lists --------------------------------------------------------------
+
+/** Build one task row. Today rows are draggable between and within groups. */
+function taskRow(task, priority) {
+  const row = el("div", "task");
+  row.dataset.id = task.id;
+  const body = el("div", "body");
+  body.append(el("div", "title", task.title || "New To-Do"));
+  if (task.context) body.append(el("div", "context", task.context));
+  row.append(body);
+  for (const tag of task.tags) row.append(el("span", "pill", tag));
+  if (task.deadline_label) {
+    const flag = el("span", "deadline" + (task.deadline_state === "overdue" ? " overdue" : ""));
+    flag.innerHTML = FLAG; // Static icon markup only.
+    flag.append(task.deadline_label);
+    row.append(flag);
+  }
+  row.onclick = () => openTask(task.id);
+  if (priority) {
+    row.draggable = true;
+    row.addEventListener("dragstart", (event) => {
+      state.drag = { id: task.id, from: priority };
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", task.id);
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      state.drag = null;
+      removeMarker();
+    });
+  }
+  return row;
+}
+
+/** Add the list title with its icon. */
+function renderHeader(content, entry) {
+  const heading = el("h1");
+  heading.innerHTML = ICONS[entry.icon]; // Static icon markup only.
+  heading.append(entry.name);
+  content.append(heading);
+}
+
+/** Add warnings about missing tags or an unconfirmed write. */
+function renderBanners(content, data) {
+  if (data.missing_tags && data.missing_tags.length) {
+    content.append(el("div", "banner",
+      `Create these tags in Things so Do Things can assign them: ${data.missing_tags.join(", ")}.`));
+  }
+  if (data.write_failed) {
+    const banner = el("div", "banner", "Things did not confirm a change. The auth token may be wrong, or Things may not be running.");
+    const fix = el("button", "secondary", "Update token");
+    fix.onclick = () => showSetup(false);
+    banner.append(fix);
+    content.append(banner);
+  }
+}
+
+/** Draw a list: priority groups for Today, a flat list otherwise. */
+function renderList(data) {
+  const content = document.getElementById("content");
+  content.replaceChildren();
+  renderHeader(content, LISTS.find((l) => l && l.id === data.name));
+  renderBanners(content, data);
+  const status = el("div", "status");
+  status.id = "status";
+  content.append(status);
+  if (data.groups) {
+    for (const group of data.groups) content.append(renderGroup(group));
+  } else {
+    const zone = el("div", "drop-zone");
+    if (!data.tasks.length) zone.append(el("div", "empty", "Nothing here."));
+    for (const task of data.tasks) zone.append(taskRow(task, null));
+    content.append(zone);
+  }
+}
+
+/** Build a Today priority section that accepts dropped tasks. */
+function renderGroup(group) {
+  const section = el("section", "group");
+  const title = el("h2", "", group.label);
+  title.append(el("span", "tag", group.priority));
+  const zone = el("div", "drop-zone");
+  zone.dataset.priority = group.priority;
+  if (!group.tasks.length) zone.append(el("div", "empty", "No tasks"));
+  for (const task of group.tasks) zone.append(taskRow(task, group.priority));
+  zone.addEventListener("dragover", (event) => {
+    if (!state.drag) return;
+    event.preventDefault();
+    placeMarker(zone, event.clientY);
+  });
+  zone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    if (state.drag) dropTask(zone, event.clientY);
+  });
+  section.append(title, zone);
+  return section;
+}
+
+// --- Drag and drop -----------------------------------------------------------
+
+/** Return the rows in a zone other than the one being dragged. */
+function otherRows(zone) {
+  return [...zone.querySelectorAll(".task")].filter((r) => r.dataset.id !== state.drag.id);
+}
+
+/** Index where a drop at clientY would insert, based on row midpoints. */
+function dropIndex(zone, clientY) {
+  const rows = otherRows(zone);
+  const index = rows.findIndex((r) => {
+    const box = r.getBoundingClientRect();
+    return clientY < box.top + box.height / 2;
+  });
+  return index === -1 ? rows.length : index;
+}
+
+/** Remove the drop position marker. */
+function removeMarker() {
+  document.querySelectorAll(".drop-marker").forEach((m) => m.remove());
+}
+
+/** Show where a dragged task would land. */
+function placeMarker(zone, clientY) {
+  removeMarker();
+  const rows = otherRows(zone);
+  const index = dropIndex(zone, clientY);
+  const marker = el("div", "drop-marker");
+  if (index < rows.length) zone.insertBefore(marker, rows[index]);
+  else zone.append(marker);
+}
+
+/** Save a drop: a reorder within a group, or a move to another priority. */
+async function dropTask(zone, clientY) {
+  const { id, from } = state.drag;
+  const to = zone.dataset.priority;
+  const ids = otherRows(zone).map((r) => r.dataset.id);
+  ids.splice(dropIndex(zone, clientY), 0, id);
+  removeMarker();
+  state.busy = true;
+  setStatus(from === to ? "Saving order…" : `Moving to ${to}…`);
+  try {
+    const result = from === to
+      ? await api("/api/order", { priority: to, order: ids })
+      : await api("/api/move", { id, priority: to, order: ids });
+    if (!result.ok) {
+      setStatus("Things did not confirm the move. Check the auth token and that Things is running.");
+    }
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    state.busy = false;
+    load();
+  }
+}
+
+/** Ask the server to open a task in Things for editing. */
+async function openTask(id) {
+  try {
+    await api("/api/open", { id });
+  } catch (error) {
+    setStatus(error.message);
+  }
+}
+
+// --- Setup (auth token) --------------------------------------------------------
+
+/** Show the token screen. `firstRun` hides the Cancel button. */
+function showSetup(firstRun) {
+  state.view = "setup";
+  renderSidebar();
+  const content = document.getElementById("content");
+  content.replaceChildren();
+  const box = el("div", "setup");
+  box.append(el("h1", "", firstRun ? "Welcome to Do Things" : "Things auth token"));
+  box.append(el("p", "", "Do Things needs your Things auth token to change tags and deadlines."));
+  const steps = el("ol");
+  for (const step of [
+    "Open Things and choose Things › Settings.",
+    "In General, turn on Enable Things URLs.",
+    "Click Manage and copy the authorization token.",
+    "Paste it below and click Save.",
+  ]) steps.append(el("li", "", step));
+  const input = el("input");
+  input.type = "password";
+  input.placeholder = "Auth token";
+  input.autocomplete = "off";
+  const message = el("div", "error");
+  const save = el("button", "", "Save");
+  save.onclick = async () => {
+    try {
+      await api("/api/token", { token: input.value });
+      state.view = "list";
+      load();
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  };
+  input.onkeydown = (event) => { if (event.key === "Enter") save.click(); };
+  box.append(steps, input, message, save);
+  if (!firstRun) {
+    const cancel = el("button", "secondary", "Cancel");
+    cancel.style.marginLeft = "8px";
+    cancel.onclick = () => { state.view = "list"; load(); };
+    box.append(cancel);
+  }
+  content.append(box);
+  input.focus();
+}
+
+// --- Loading -----------------------------------------------------------------
+
+/** Fetch and show the current list. Skipped while a save, drag or setup is in progress. */
+async function load() {
+  if (state.busy || state.drag || state.view === "setup") return;
+  renderSidebar();
+  try {
+    const data = await api(`/api/list?name=${encodeURIComponent(state.list)}`);
+    if (!data.token_set) { showSetup(true); return; }
+    renderList(data);
+  } catch (error) {
+    const content = document.getElementById("content");
+    content.replaceChildren(el("div", "banner", error.message));
+  }
+}
+
+/** Load the version, show the first list, and start the refresh timers. */
+async function start() {
+  try {
+    state.version = (await api("/api/status")).version;
+  } catch (error) {
+    // The list request below reports the problem.
+  }
+  load();
+  setInterval(load, REFRESH_MS);
+  window.addEventListener("focus", load);
+}
+
+start();
+</script>
+</body>
+</html>
