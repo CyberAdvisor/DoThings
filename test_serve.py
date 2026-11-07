@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Tests for Things-style row data: deadline wording,
+  start badge, all tags, notes/checklist/repeating flags.
 - v0.1.18 (2026-11-07): Sequence flow tests use Pull records with the
   triggering task, including Things moving the reopened task to the bottom.
 - v0.1.17 (2026-11-07): The sequence record is kept in the test's temporary
@@ -35,11 +37,12 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
 import serve
+from priority_check import Task
 from common import (
     LOCAL_TZ,
     Pull,
@@ -387,7 +390,7 @@ class EditTests(MockThingsTestCase):
         detail = serve.task_detail("task1")
         task = detail["task"]
         self.assertEqual((task["priority"], task["when"]), ("P2", {"kind": "today", "date": TODAY.isoformat()}))
-        self.assertEqual(task["tags"], [])
+        self.assertEqual((task["tags"], task["other_tags"]), (["P2"], []))
         self.assertEqual(detail["today"], TODAY.isoformat())
         self.assertEqual(detail["options"]["tags"], ["Home"])
         self.assertEqual([p["id"] for p in detail["options"]["projects"]], ["proj1"])
@@ -449,6 +452,33 @@ class EditTests(MockThingsTestCase):
     def test_unconfirmed_edit_reported(self) -> None:
         self.apply_change.return_value = False
         self.assertEqual(self.edit(title="X"), {"ok": False, "write_failed": True})
+
+
+class RowDisplayTests(unittest.TestCase):
+    """Rows are described the way Things shows them."""
+
+    def test_deadline_wording(self) -> None:
+        cases = {-3: "3 days ago", -1: "1 day ago", 0: "today", 1: "1 day left", 9: "9 days left"}
+        for offset, label in cases.items():
+            with self.subTest(offset=offset):
+                self.assertEqual(serve.deadline_label(TODAY + timedelta(days=offset), TODAY), label)
+        self.assertIsNone(serve.deadline_label(None, TODAY))
+
+    def test_start_badge(self) -> None:
+        self.assertIsNone(serve.start_label(None, TODAY))
+        self.assertIsNone(serve.start_label(TODAY, TODAY))
+        self.assertIsNone(serve.start_label(TODAY - timedelta(days=2), TODAY))
+        self.assertEqual(serve.start_label(TODAY + timedelta(days=2), TODAY), "Mon")  # 2026-11-09.
+        self.assertEqual(serve.start_label(TODAY + timedelta(days=7), TODAY), "Nov 14")
+        self.assertEqual(serve.start_label(date(2027, 1, 5), TODAY), "Jan 5, 2027")
+
+    def test_row_fields(self) -> None:
+        task = Task(uuid="A1", title="T", tags=["Home", "P1"], notes="  ", repeating=True, has_checklist=True)
+        row = serve.task_to_json(task, TODAY)
+        self.assertEqual(row["tags"], ["Home", "P1"])
+        self.assertFalse(row["has_notes"])  # Only whitespace.
+        self.assertTrue(row["has_checklist"] and row["repeating"])
+        self.assertTrue(serve.task_to_json(Task(uuid="A2", title="T", notes="x"), TODAY)["has_notes"])
 
 
 class ListRoutingTests(MockThingsTestCase):

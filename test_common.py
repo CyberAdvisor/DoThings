@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Test for the repeating and checklist flags read
+  with each task.
 - v0.1.18 (2026-11-07): Pull records with `after`; read_last_completed.
 - v0.1.17 (2026-11-07): Tests for load_pulls/save_pulls.
 - v0.1.16 (2026-11-07): read_sequential_projects test replaces read_next_tasks.
@@ -93,7 +95,7 @@ CREATE TABLE TMTask (
     uuid TEXT PRIMARY KEY, title TEXT, type INTEGER, status INTEGER, trashed INTEGER,
     start INTEGER, startDate INTEGER, deadline INTEGER, deadlineSuppressionDate INTEGER,
     todayIndex INTEGER, "index" INTEGER, project TEXT, heading TEXT, area TEXT,
-    stopDate REAL, rt1_recurrenceRule BLOB, notes TEXT
+    stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT
 );
 CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
@@ -401,6 +403,15 @@ class DatabaseTests(unittest.TestCase):
             )
         with open_things_db(self.path) as conn:
             self.assertEqual(count_inbox(conn), 2)
+
+    def test_repeating_and_checklist_flags(self) -> None:
+        with write_db(self.path) as conn:
+            conn.execute("UPDATE TMTask SET rt1_repeatingTemplate = 'tmpl' WHERE uuid = 'today1'")
+            conn.execute("INSERT INTO TMChecklistItem VALUES ('c1', 'One', 0, 'today2', 0)")
+        with open_things_db(self.path) as conn:
+            one, two = read_task(conn, "today1"), read_task(conn, "today2")
+        self.assertEqual((one.repeating, one.has_checklist), (True, False))
+        self.assertEqual((two.repeating, two.has_checklist), (False, True))
 
     def test_checklist_progress(self) -> None:
         with write_db(self.path) as conn:

@@ -8,9 +8,13 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Rows are sent the way Things shows them: all tags
+  (P tags included), Things-style deadline wording ("1 day ago", "today",
+  "2 days left"), a start-date badge for later starts, and whether the task
+  has notes, a checklist or repeats. The editor's tag list is `other_tags`.
 - v0.1.18 (2026-11-07): The sequence record keeps the task whose completion
   led to each start; unchecking that task undoes the start wherever Things
   has moved it, and the reopened task is then recorded as in progress so the
@@ -142,29 +146,52 @@ class ApiError(Exception):
 
 
 def task_to_json(task: Task, today: date) -> Dict[str, Any]:
-    """Convert a Task into the JSON shape the page renders."""
+    """Convert a Task into the JSON shape the page renders, mirroring a Things row."""
     return {
         "id": task.uuid,
         "title": task.title,
         "context": task.context,
-        # P tags are shown by grouping, so only other tags are listed.
-        "tags": [t for t in task.tags if t not in PRIORITIES],
+        "tags": task.tags,  # All tags, P tags included, as Things shows them.
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "deadline_label": deadline_label(task.deadline, today),
         "deadline_state": deadline_state(task.deadline, today),
         "start_date": task.start_date.isoformat() if task.start_date else None,
+        "start_label": start_label(task.start_date, today),
+        "has_notes": bool(task.notes.strip()),
+        "has_checklist": task.has_checklist,
+        "repeating": task.repeating,
         "completed": task.completed,
     }
 
 
+def _plural(count: int, word: str) -> str:
+    """Return e.g. '1 day' or '3 days'."""
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
 def deadline_label(deadline: Optional[date], today: date) -> Optional[str]:
-    """Return a short Things-style label for a deadline ('Today', 'Nov 9')."""
+    """Return the deadline as Things words it: '1 day ago', 'today' or '2 days left'."""
     if deadline is None:
         return None
-    if deadline == today:
-        return "Today"
-    label = f"{deadline.strftime('%b')} {deadline.day}"
-    return label if deadline.year == today.year else f"{label}, {deadline.year}"
+    days = (deadline - today).days
+    if days == 0:
+        return "today"
+    if days < 0:
+        return f"{_plural(-days, 'day')} ago"
+    return f"{_plural(days, 'day')} left"
+
+
+def start_label(start: Optional[date], today: date) -> Optional[str]:
+    """Return the badge Things shows for a later start: 'Mon' within a week, else 'Nov 14'.
+
+    None for no start date or one of today or earlier (the task is in Today).
+    """
+    if start is None or start <= today:
+        return None
+    if (start - today).days < 7:
+        return start.strftime("%a")
+    label = f"{start.strftime('%b')} {start.day}"
+    return label if start.year == today.year else f"{label}, {start.year}"
 
 
 def require_db_path() -> str:
@@ -382,6 +409,7 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         raise ApiError(404, "Task not found in Things.")
     detail = task_to_json(task, today)
     detail.update(
+        other_tags=[t for t in task.tags if t not in PRIORITIES],  # The editor shows priority separately.
         notes=task.notes,
         when=when_json(task, today),
         priority=required_priority(task, today),

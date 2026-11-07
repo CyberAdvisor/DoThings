@@ -6,9 +6,11 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Schema check requires `rt1_repeatingTemplate` again
+  (used for the repeating icon).
 - v0.1.18 (2026-11-07): Sequential projects also show Do Things' record (the
   task it started and the one it followed), which decides what is in progress.
 - v0.1.17 (2026-11-07): Synchronized module version metadata.
@@ -54,7 +56,7 @@ REQUIRED_COLUMNS = {
     "TMTask": (
         "uuid", "title", "type", "status", "trashed", "start", "startDate", "deadline",
         "todayIndex", "index", "project", "heading", "area", "stopDate", "rt1_recurrenceRule",
-        "notes",
+        "notes", "rt1_repeatingTemplate",
     ),
     "TMTag": ("uuid", "title"),
     "TMTaskTag": ("tasks", "tags"),

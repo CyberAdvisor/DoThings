@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Tasks are read with whether they are a copy of a
+  repeating to-do and whether they have a checklist (for the row icons).
 - v0.1.18 (2026-11-07): The sequence record (Pull) also keeps `after`, the
   task whose completion led to the start; read_last_completed finds it.
 - v0.1.17 (2026-11-07): load_pulls/save_pulls keep, per sequential project,
@@ -197,6 +199,8 @@ _TASK_SELECT = f"""
 SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
        COALESCE(t.project, h.project) AS project_id, h."index" AS heading_index, t."index" AS task_index,
+       t.rt1_repeatingTemplate IS NOT NULL AS repeating,
+       EXISTS (SELECT 1 FROM TMChecklistItem ci WHERE ci.task = t.uuid) AS has_checklist,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
@@ -242,6 +246,8 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         heading_id=row["heading_id"],
         project_id=row["project_id"],
         project_rank=_project_rank(row["heading_id"], row["heading_index"], row["task_index"]),
+        repeating=bool(row["repeating"]),
+        has_checklist=bool(row["has_checklist"]),
     )
 
 

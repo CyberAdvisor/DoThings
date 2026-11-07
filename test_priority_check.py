@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Synchronized module version metadata.
 - v0.1.18 (2026-11-07): Undo tests use the task whose completion led to the
   start, including after Things moved it to the bottom.
 - v0.1.17 (2026-11-07): Tests for find_pulled and plan_sequence_undo.

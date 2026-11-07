@@ -6,9 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.18
+Version: 0.1.19
 
 Change log:
+- v0.1.19 (2026-11-07): Tasks carry `repeating` (a copy of a repeating
+  to-do) and `has_checklist`, for the Things-style row icons.
 - v0.1.18 (2026-11-07): The undo is triggered by the task whose completion
   led to the start being open again, not by project order (Things moves a
   reopened task to the bottom of its project).
@@ -83,6 +85,8 @@ class Task:
     # Position in the project's manual order: (0 = no heading / 1 = under a heading,
     # heading position, position within the heading or the project).
     project_rank: Tuple[int, int, int] = (0, 0, 0)
+    repeating: bool = False  # A copy of a repeating to-do (shown with a ↻ icon).
+    has_checklist: bool = False
 
     @property
     def completed(self) -> bool:

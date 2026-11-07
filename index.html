@@ -3,9 +3,14 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.18
+  Version: 0.1.19
 
   Change log:
+  - v0.1.19 (2026-11-07): Rows look like Things: rounded-square checkboxes
+    (also Hide Completed), tags as outlined pills right after the title with
+    P tags included, gray icons after the title for repeating, notes and
+    checklist, a start-date badge before the title for later starts, and a
+    filled flag with Things' deadline wording (red when today or overdue).
   - v0.1.18 (2026-11-07): Synchronized module version metadata.
   - v0.1.17 (2026-11-07): Synchronized module version metadata.
   - v0.1.16 (2026-11-07): Synchronized module version metadata.
@@ -92,10 +97,10 @@
   }
   .nav-item .opens-things { color: var(--muted); }
   .nav-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
-  /* The Hide Completed checkbox looks like a task's round checkbox. */
+  /* The Hide Completed checkbox looks like a task's checkbox. */
   .nav-option input {
     appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; flex-shrink: 0;
-    border: 1.5px solid var(--muted); border-radius: 50%; cursor: pointer; position: relative;
+    border: 1.5px solid var(--muted); border-radius: 4px; cursor: pointer; position: relative;
   }
   .nav-option input:checked { background: var(--muted); }
   .nav-option input:checked::after {
@@ -135,9 +140,9 @@
   .task:hover { background: var(--hover); }
   .task.dragging { opacity: 0.4; }
   .task.saving { opacity: 0.6; } /* Shown as changed; Things hasn't confirmed it yet. */
-  /* Completion checkbox, round like Things. */
+  /* Completion checkbox, a rounded square like Things. */
   .check {
-    width: 16px; height: 16px; flex-shrink: 0; border-radius: 50%; padding: 0;
+    width: 16px; height: 16px; flex-shrink: 0; border-radius: 4px; padding: 0;
     border: 1.5px solid var(--muted); background: transparent; cursor: pointer;
     display: flex; align-items: center; justify-content: center;
   }
@@ -147,11 +152,22 @@
   .task.done { opacity: 0.55; }
   .task.done .title { text-decoration: line-through; color: var(--muted); }
   .task .body { flex: 1; min-width: 0; }
-  .task .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* First line, as in Things: [start badge] title [icons] [tag pills]. */
+  .task .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .task .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+  .task .icon { color: var(--muted); display: flex; flex-shrink: 0; }
+  .task .icon svg { width: 13px; height: 13px; }
+  .task .when-badge {
+    background: var(--pill); color: var(--muted); border-radius: 4px; padding: 0 5px;
+    font-size: 11px; flex-shrink: 0;
+  }
   .task .context { color: var(--muted); font-size: 12px; }
-  .pill { background: var(--pill); color: var(--muted); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+  .pill {
+    border: 1px solid var(--muted); color: var(--muted); border-radius: 10px; padding: 0 7px;
+    font-size: 11px; flex-shrink: 0; white-space: nowrap;
+  }
   .deadline { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .deadline.overdue { color: var(--red); }
+  .deadline.overdue, .deadline.today { color: var(--red); }
   .deadline svg { width: 12px; height: 12px; }
   /* Inline editor: the clicked task expands into a card, like Things. */
   .editor {
@@ -242,7 +258,14 @@ const ICONS = {
 const TICK = '<svg viewBox="0 0 10 10"><path d="M2 5.2l2 2L8 3" stroke="#fff" stroke-width="1.6" fill="none"/></svg>';
 // Marks sidebar entries that open in Things instead of in Do Things.
 const OPENS_IN_THINGS = '<svg viewBox="0 0 12 12"><path d="M4 2h6v6M10 2L3 9" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
-const FLAG = '<svg viewBox="0 0 12 12"><path d="M2 1v10M2 1.5h7l-1.6 2.5L9 6.5H2" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>';
+// Filled deadline flag, as in Things.
+const FLAG = '<svg viewBox="0 0 12 12"><path d="M2 1v10" stroke="currentColor" stroke-width="1.3"/><path d="M2.6 1.5h7l-1.6 2.5L9.6 6.5h-7z" fill="currentColor"/></svg>';
+// Gray row icons shown after the title, as in Things.
+const ROW_ICONS = {
+  repeating: '<svg viewBox="0 0 14 14"><path d="M11.5 7A4.5 4.5 0 1 1 9.6 3.3" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M9 1v3h3" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>',
+  notes: '<svg viewBox="0 0 14 14"><path d="M3 3.5h8M3 7h8M3 10.5h5" stroke="currentColor" stroke-width="1.4"/></svg>',
+  checklist: '<svg viewBox="0 0 14 14"><circle cx="3" cy="3.5" r="1.3" fill="none" stroke="currentColor"/><circle cx="3" cy="7" r="1.3" fill="none" stroke="currentColor"/><circle cx="3" cy="10.5" r="1.3" fill="none" stroke="currentColor"/><path d="M6 3.5h6M6 7h6M6 10.5h6" stroke="currentColor" stroke-width="1.3"/></svg>',
+};
 // `things: true` entries open that list in Things; the rest are shown here.
 const LISTS = [
   { id: "inbox", name: "Inbox", icon: "inbox", things: true },
@@ -402,12 +425,23 @@ function taskRow(task, priority) {
   };
   row.append(check);
   const body = el("div", "body");
-  body.append(el("div", "title", task.title || "New To-Do"));
+  const line = el("div", "line");
+  if (task.start_label) line.append(el("span", "when-badge", task.start_label));
+  line.append(el("span", "title", task.title || "New To-Do"));
+  for (const [key, label] of [["repeating", "Repeating"], ["has_notes", "Notes"], ["has_checklist", "Checklist"]]) {
+    if (!task[key]) continue;
+    const icon = el("span", "icon");
+    icon.title = label;
+    icon.innerHTML = ROW_ICONS[key.replace("has_", "")]; // Static icon markup only.
+    line.append(icon);
+  }
+  for (const tag of task.tags) line.append(el("span", "pill", tag));
+  body.append(line);
   if (task.context) body.append(el("div", "context", task.context));
   row.append(body);
-  for (const tag of task.tags) row.append(el("span", "pill", tag));
   if (task.deadline_label) {
-    const flag = el("span", "deadline" + (task.deadline_state === "overdue" ? " overdue" : ""));
+    // Red when today or overdue, gray when later, as in Things.
+    const flag = el("span", "deadline " + (task.deadline_state || ""));
     flag.innerHTML = FLAG; // Static icon markup only.
     flag.append(task.deadline_label);
     row.append(flag);
@@ -640,11 +674,11 @@ async function startEdit(row, id) {
       pickerMonth: null,  // First day of the month the picker shows (YYYY-MM-01).
       draft: {
         title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
-        priority: task.priority, tags: [...task.tags], list_id: task.list_id, heading_id: task.heading_id,
+        priority: task.priority, tags: [...task.other_tags], list_id: task.list_id, heading_id: task.heading_id,
       },
       // Empty fields start hidden and are added with the buttons at the bottom.
       shown: {
-        tags: task.tags.length > 0, when: task.when.kind !== "anytime",
+        tags: task.other_tags.length > 0, when: task.when.kind !== "anytime",
         deadline: Boolean(task.deadline), list: Boolean(task.list_id),
       },
     };
@@ -999,7 +1033,7 @@ function editorChanges() {
   }
   if (draft.deadline !== (task.deadline || "")) changes.deadline = draft.deadline;
   if (draft.priority !== task.priority) changes.priority = draft.priority;
-  if ([...draft.tags].sort().join("\u001f") !== [...task.tags].sort().join("\u001f")) changes.tags = draft.tags;
+  if ([...draft.tags].sort().join("\u001f") !== [...task.other_tags].sort().join("\u001f")) changes.tags = draft.tags;
   if (draft.list_id && draft.list_id !== task.list_id) changes.list_id = draft.list_id;
   if (draft.heading_id && draft.heading_id !== task.heading_id) changes.heading_id = draft.heading_id;
   return { changes };
@@ -1012,7 +1046,7 @@ function saveEditor() {
   if (!Object.keys(changes).length) { closeEditor(); return; }
   const { task, draft, card } = state.edit;
   // Close the card straight away, showing the task as edited.
-  const row = taskRow({ ...task, title: draft.title.trim(), tags: draft.tags }, null);
+  const row = taskRow({ ...task, title: draft.title.trim(), tags: [...draft.tags, draft.priority] }, null);
   card.replaceWith(row);
   state.edit = null;
   enqueue(row, "the changes", () => api("/api/edit", { id: task.id, changes }));
