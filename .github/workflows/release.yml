@@ -1,0 +1,49 @@
+# Creates the vX.Y.Z tag and GitHub release for each new version pushed to main.
+#
+# Version: 0.1.4
+#
+# Change log:
+# - v0.1.4 (2026-11-07): Initial release.
+#
+# On every push to main it reads VERSION. If the tag for that version does not
+# exist yet, it creates the tag on the pushed commit and a release titled with
+# the commit subject, using the commit message body (without the trailing
+# Co-Authored-By / Claude-Session lines) as the release notes. Pushes that do
+# not change VERSION find the tag already present and do nothing.
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write  # needed to create tags and releases
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history and tags, so an existing tag is detected
+
+      - name: Create tag and release for VERSION
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          # Fail safe: refuse to tag anything that is not a plain X.Y.Z version.
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "VERSION is not X.Y.Z: '$version'" >&2
+            exit 1
+          fi
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag already exists; nothing to release."
+            exit 0
+          fi
+          title="$(git log -1 --format=%s "$GITHUB_SHA")"
+          git log -1 --format=%b "$GITHUB_SHA" | sed '/^Co-Authored-By:/,$d' > release-notes.md
+          gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --notes-file release-notes.md

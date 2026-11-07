@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.3
+Version: 0.1.4
 
 Change log:
+- v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): To-dos inside a trashed project or heading are no longer
   listed, and open lists also skip to-dos whose project or heading is completed

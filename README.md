@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.4 (2026-11-07):** Pushing a new version to `main` now creates its `vX.Y.Z` tag and GitHub release automatically, with the commit message as the release notes. `.gitignore` now also ignores Python's `__pycache__/` folder.
 - **v0.1.3 (2026-11-07):** Added the missing `.gitignore`, so the auth token, the saved task order and the logs can't be committed by accident.
 - **v0.1.2 (2026-11-07):** To-dos inside a trashed project or heading no longer appear, and the Today, Inbox, Anytime, Upcoming, Someday, P1–P3 and Overdue lists no longer show to-dos whose project or heading is completed or canceled. Setup now covers giving Terminal Full Disk Access, which reading the Things database requires.
 - **v0.1.1 (2026-11-07):** Moving a task out of P1 that is in Today only because of its deadline now also sets its start date to today, so it stays in Today.
@@ -63,6 +64,7 @@ cd ~/Documents/Projects/DoThings
 - Folder: `~/Documents/Projects/DoThings`. It is the only copy, used for editing, testing and running.
 - Clone: `git clone https://github.com/CyberAdvisor/DoThings.git ~/Documents/Projects/DoThings`
 - Workflow: edit → test (see the verification commands in `AGENTS.md`) → commit → push.
+- Releases: bump `VERSION` and push to `main`. The `Release` GitHub Action then creates the `vX.Y.Z` tag on that commit and a GitHub release titled with the commit subject, using the commit message body as the notes. Pushes that don't change `VERSION` create nothing. Don't create the tag by hand, or the action will skip that version's release.
 
 ## 7. Start with Shortcuts
 Do Things is a server that keeps running while you use it, so the shortcut starts it in the background.
@@ -85,6 +87,7 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 | `VERSION` | Project version |
 | `.gitignore` | Keeps logs, the order file and the token out of git |
 | `requirements.txt` | States that only the standard library is used |
+| `.github/workflows/release.yml` | GitHub Action that tags and releases each new version pushed to `main` |
 | `common.py` | Paths, version, logging, read-only Things database access, Things URL commands, order file, auth token |
 | `priority_check.py` | The priority and move rules, grouping and ordering (pure logic) |
 | `serve.py` | Entry point: local server and JSON API |

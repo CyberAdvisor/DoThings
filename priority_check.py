@@ -4,9 +4,10 @@ Pure logic with no I/O, so every rule can be unit-tested without Things.
 It decides which priority tag (P1, P2, P3) a task should carry, what changes a
 manual move implies, and how tasks are grouped and ordered for display.
 
-Version: 0.1.3
+Version: 0.1.4
 
 Change log:
+- v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): Synchronized module version metadata.
 - v0.1.1 (2026-11-07): Moving a deadline-only Today task out of P1 also sets its start date to today.

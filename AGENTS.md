@@ -9,6 +9,7 @@ Guide for contributors and AI agents working on this repository.
 - All logic lives in Python. `index.html` only renders lists and sends actions.
 - Target: Python 3.9 (macOS Command Line Tools), standard library only. Times are Mountain Time (`America/Denver`).
 - Workflow: change → test → commit → push, in the single folder `~/Documents/Projects/DoThings`.
+- Releases (deviation from the project standard): do not create tags or releases by hand. Bump `VERSION`, make the commit subject `vX.Y.Z: <summary>` and its body the release notes (version, user-visible behavior, safety impact, verification), and push to `main`; `.github/workflows/release.yml` tags that commit and publishes the release. The workflow file lives in `.github/workflows/` because GitHub requires it there.
 
 ## Files
 | File | Purpose |
@@ -20,6 +21,7 @@ Guide for contributors and AI agents working on this repository.
 | `index.html` | Page: sidebar, lists, drag-and-drop, token setup |
 | `test_priority_check.py`, `test_common.py` | Unit tests (`test_common.py` builds a mock Things database) |
 | `README.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
+| `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
 
 ## Safety-critical behavior
 Do not weaken any of these without explicit approval:
