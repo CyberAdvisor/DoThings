@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.22
+Version: 0.1.23
 
 Change log:
+- v0.1.23 (2026-11-07): P tags are hidden in Today and the P searches,
+  shown only in Overdue.
 - v0.1.22 (2026-11-07): Test that Today's grouped rows leave out P tags and
   the searches keep them.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
@@ -349,14 +351,15 @@ class CompletionTests(MockThingsTestCase):
                 self.assertEqual(ids(hidden), ["task1"])
                 self.assertEqual(hidden["counts"], shown["counts"])
 
-    def test_today_rows_hide_p_tags_searches_keep_them(self) -> None:
+    def test_p_tags_shown_only_in_overdue(self) -> None:
         self.add_tags("Home")
         with write_db(self.db_path) as conn:
             conn.executemany("INSERT INTO TMTaskTag VALUES ('task1', ?)", [("t1",), ("Home",)])
-        today_row = serve.list_response("today")["groups"][0]["tasks"][0]
-        search_row = serve.list_response("p1")["tasks"][0]
-        self.assertEqual(today_row["tags"], ["Home"])
-        self.assertEqual(sorted(search_row["tags"]), ["Home", "P1"])
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'",
+                         (pack_things_date(TODAY - timedelta(days=1)),))
+        self.assertEqual(serve.list_response("today")["groups"][0]["tasks"][0]["tags"], ["Home"])
+        self.assertEqual(serve.list_response("p1")["tasks"][0]["tags"], ["Home"])
+        self.assertEqual(sorted(serve.list_response("overdue")["tasks"][0]["tags"]), ["Home", "P1"])
 
     def test_completed_task_cannot_be_moved(self) -> None:
         self.add_completed_task("done1")

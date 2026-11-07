@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.22
+  Version: 0.1.23
 
   Change log:
+  - v0.1.23 (2026-11-07): After saving an edit, the row shows a P tag only in
+    the Overdue search, matching the server.
   - v0.1.22 (2026-11-07): After saving an edit in Today, the row shows no P tag
     (Today's groups show the priority).
   - v0.1.21 (2026-11-07): The notes icon is a page with a folded corner, as in Things.
@@ -1063,8 +1065,8 @@ function saveEditor() {
   if (!Object.keys(changes).length) { closeEditor(); return; }
   const { task, draft, card } = state.edit;
   // Close the card straight away, showing the task as edited.
-  // In Today the group shows the priority, so the row has no P tag (as the server sends it).
-  const tags = state.list === "today" ? draft.tags : [...draft.tags, draft.priority];
+  // Only the Overdue search shows P tags; elsewhere the list shows the priority (as the server sends it).
+  const tags = state.list === "overdue" ? [...draft.tags, draft.priority] : draft.tags;
   const row = taskRow({ ...task, title: draft.title.trim(), tags }, null);
   card.replaceWith(row);
   state.edit = null;

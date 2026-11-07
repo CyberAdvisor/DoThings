@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.22
+Version: 0.1.23
 
 Change log:
+- v0.1.23 (2026-11-07): P tags are also left out in the P1-P3 searches (the
+  search names the priority); only Overdue shows them.
 - v0.1.22 (2026-11-07): Today's grouped rows leave out the P1-P3 tags (the
   group shows the priority); the searches still show them.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
@@ -136,6 +138,8 @@ REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TITLE_CHARS = 1000
 MAX_NOTES_CHARS = 20000
+# Lists whose rows show the P1-P3 tags; elsewhere the list itself shows the priority.
+PRIORITY_TAG_LISTS = ("overdue",)
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
 
@@ -149,13 +153,13 @@ class ApiError(Exception):
         self.message = message
 
 
-def task_to_json(task: Task, today: date, grouped: bool = False) -> Dict[str, Any]:
+def task_to_json(task: Task, today: date, show_priority_tags: bool = True) -> Dict[str, Any]:
     """Convert a Task into the JSON shape the page renders, mirroring a Things row.
 
-    With `grouped` (Today's priority groups) the P tags are left out, since
-    the group already shows the priority; otherwise all tags are sent.
+    Without `show_priority_tags` the P tags are left out: in Today's groups
+    and the P1-P3 searches the priority is already shown by the list itself.
     """
-    tags = [t for t in task.tags if t not in PRIORITIES] if grouped else task.tags
+    tags = task.tags if show_priority_tags else [t for t in task.tags if t not in PRIORITIES]
     return {
         "id": task.uuid,
         "title": task.title,
@@ -324,12 +328,14 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
             {
                 "priority": p,
                 "label": PRIORITY_LABELS[p],
-                "tasks": [task_to_json(t, today, grouped=True) for t in groups[p]],
+                "tasks": [task_to_json(t, today, show_priority_tags=False) for t in groups[p]],
             }
             for p in PRIORITIES
         ]
     else:
-        response["tasks"] = [task_to_json(t, today) for t in completed_last(tasks)]
+        # Only Overdue mixes priorities, so only it shows the P tags.
+        shown = name in PRIORITY_TAG_LISTS
+        response["tasks"] = [task_to_json(t, today, show_priority_tags=shown) for t in completed_last(tasks)]
     return response
 
 
