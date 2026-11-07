@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.24
+Version: 0.1.25
 
 Change log:
+- v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): P searches leave out tagged tasks that are not in Today.
 - v0.1.23 (2026-11-07): Synchronized module version metadata.
 - v0.1.22 (2026-11-07): Synchronized module version metadata.

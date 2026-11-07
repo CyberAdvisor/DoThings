@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.25 (2026-11-07):** Moving a task into or out of P1 keeps a deadline that is after today. Moving into P1 sets the deadline to today only when there is none; moving out of P1 removes it only when it is today or overdue.
 - **v0.1.24 (2026-11-07):** The P1, P2 and P3 searches list only tasks that are in Today. A tagged task that starts later (for example, deferred to tomorrow) no longer shows in its search until its start date.
 - **v0.1.23 (2026-11-07):** The P1, P2 and P3 searches also hide the P tag on each row (the search name already says it). Only the Overdue search, which mixes priorities, shows it.
 - **v0.1.22 (2026-11-07):** In Today, task rows no longer show the P1, P2 or P3 tag, since the group they're in already shows the priority. The P1, P2, P3 and Overdue searches still show it.
@@ -41,8 +42,8 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
   3. A Today task with no P tag is tagged P2.
   4. A task with no start date (Inbox, Anytime or Someday) that is due today or overdue gets a start date of today.
 - Drag a task to another priority to move it. The move replaces its P tags, and:
-  - moving into P1 sets its deadline to today;
-  - moving out of P1 removes its deadline, and if the task was in Today only because of its deadline (no start date, or one after today), sets its start date to today so it stays in Today;
+  - moving into P1 sets its deadline to today if it has none (a later deadline is kept);
+  - moving out of P1 removes a deadline of today or earlier (a later deadline is kept; an overdue one has to go, or the task would return to P1), and if the task was in Today only because of that deadline (no start date, or one after today), sets its start date to today so it stays in Today;
   - moving between P2 and P3 leaves the deadline alone.
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`. Tasks you haven't ordered here follow Things' Today order, except that tasks from the same project keep the order you set in that project in Things.
 - **Sequential projects:** tag a project `Sequential` in Things (create the tag once in Window › Tags) to work it in order. On each refresh, the project's first task (in Things' project order, across headings) with no start date and no deadline gets a start date of today, so it appears in Today. Nothing else is pulled in while it is open; when it is checked off, the next undated task is. Tasks that already have a start date or a deadline follow their own dates, and Someday tasks are skipped. If the task whose completion started the next one is opened again (for example you uncheck it), the task Do Things started goes back to undated (Anytime, without its P tag), unless you've changed its date since. The reopened task is then the one in progress, even though Things moves it to the bottom of the project.

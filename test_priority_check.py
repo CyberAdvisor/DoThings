@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.24
+Version: 0.1.25
 
 Change log:
+- v0.1.25 (2026-11-07): Tests that a later deadline is kept on moves into and out of P1.
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): Synchronized module version metadata.
 - v0.1.22 (2026-11-07): Synchronized module version metadata.
@@ -424,6 +425,16 @@ class PlanMoveTests(unittest.TestCase):
                 change = plan_move(task, destination, TODAY)
                 self.assertTrue(change.clear_deadline)
                 self.assertEqual(change.set_start_date, TODAY)
+
+    def test_later_deadline_kept_moving_into_or_out_of_p1(self) -> None:
+        for tags, destination in ((["P2"], "P1"), (["P3"], "P1"), (["P1"], "P2"), (["P1"], "P3")):
+            with self.subTest(tags=tags, destination=destination):
+                task = make_task(tags=tags, deadline=TOMORROW, start_date=TODAY)
+                change = plan_move(task, destination, TODAY)
+                self.assertEqual(change.tags, [destination])
+                self.assertIsNone(change.set_deadline)
+                self.assertFalse(change.clear_deadline)
+                self.assertIsNone(change.set_start_date)
 
     def test_into_p1_and_p2_p3_leave_start_alone(self) -> None:
         self.assertIsNone(plan_move(make_task(tags=["P2"]), "P1", TODAY).set_start_date)

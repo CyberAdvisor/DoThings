@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.24
+Version: 0.1.25
 
 Change log:
+- v0.1.25 (2026-11-07): plan_move keeps a deadline after today when moving into or out of P1; only a missing deadline is set (into P1) and only one of today or earlier is cleared (out of P1).
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): Synchronized module version metadata.
 - v0.1.22 (2026-11-07): Synchronized module version metadata.
@@ -204,16 +205,20 @@ def plan_refresh(task: Task, today: date) -> Optional[Change]:
 def plan_move(task: Task, destination: str, today: date) -> Change:
     """Return the change for manually moving `task` to `destination`.
 
-    All P tags are replaced by the destination tag. Moving into P1 sets the
-    deadline to today; P2 <-> P3 leaves it alone. Moving out of P1 clears the
-    deadline, and if the task is in Today only because of its deadline (no
-    start date, or one after today) also sets its start date to today, so it
-    stays in Today.
+    All P tags are replaced by the destination tag; a deadline after today is
+    always kept. Moving into P1 sets a missing deadline to today. Moving out of
+    P1 clears a deadline of today or earlier (an overdue one would put the task
+    straight back in P1), and if the task is in Today only because of that
+    deadline (no start date, or one after today) also sets its start date to
+    today, so it stays in Today. P2 <-> P3 leaves the deadline alone.
     """
     if destination not in PRIORITIES:
         raise ValueError(f"Unknown priority: {destination!r}")
     source = required_priority(task, today)
     change = Change(task_id=task.uuid, tags=_with_priority(task.tags, destination))
+    later_deadline = task.deadline is not None and task.deadline > today
+    if later_deadline:
+        return change
     if destination == "P1" and source != "P1":
         change.set_deadline = today
     elif source == "P1" and destination != "P1":

@@ -18,8 +18,9 @@ Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edi
 
 Manual moves:
 - All P tags are replaced with the destination tag.
-- Into P1 → the deadline is set to today.
-- Out of P1 → the deadline is cleared. If the task is in Today only because of its deadline (no start date, or one after today), its start date is also set to today (`when=YYYY-MM-DD`), so it stays in Today.
+- A deadline after today is kept on every move (v0.1.25).
+- Into P1 → a missing deadline is set to today.
+- Out of P1 → a deadline of today or earlier is cleared (an overdue one must go, or the refresh rules put the task straight back in P1). If the task is in Today only because of its deadline (no start date, or one after today), its start date is also set to today (`when=YYYY-MM-DD`), so it stays in Today.
 - P2 ↔ P3 → the deadline is unchanged.
 
 The "source" priority of a move is `required_priority` (what the rules say), not just the current tag. So an overdue task still tagged P2 counts as P1, and moving it to P2 clears its deadline.

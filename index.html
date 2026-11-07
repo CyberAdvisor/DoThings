@@ -3,9 +3,10 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.24
+  Version: 0.1.25
 
   Change log:
+  - v0.1.25 (2026-11-07): Editor note on priority changes describes the kept later deadline.
   - v0.1.24 (2026-11-07): Synchronized module version metadata.
   - v0.1.23 (2026-11-07): After saving an edit, the row shows a P tag only in
     the Overdue search, matching the server.
@@ -857,7 +858,7 @@ function buildEditor() {
   card.append(editorRow("Priority", seg));
   if (draft.priority !== task.priority) {
     card.append(el("div", "note",
-      "Moving into P1 sets the deadline to today; moving out of P1 removes it. A deadline you set here wins."));
+      "Moving into P1 sets a missing deadline to today; moving out of P1 removes a deadline of today or earlier. A later deadline is kept, and a deadline you set here wins."));
   }
   if (locked) {
     card.append(el("div", "note", "Completed. Uncheck it to edit."));
