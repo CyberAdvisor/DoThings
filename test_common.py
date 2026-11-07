@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): Synchronized module version metadata.
 - v0.1.8 (2026-11-07): Dropped the repeating-copy column and checks.
 - v0.1.7 (2026-11-07): Tests for the edit fields read from the database,
   read_edit_options, and the new update URL parameters.

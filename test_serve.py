@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): Test that a refresh gives an undated task due today a
+  start date of today.
 - v0.1.8 (2026-11-07): Removed the repeating-copy refusal test (no longer
   refused); the task detail returns today's date.
 - v0.1.7 (2026-11-07): Tests for loading a task for editing and saving edits,
@@ -101,6 +103,28 @@ class MissingTagTests(MockThingsTestCase):
     def test_move_to_existing_tag_allowed(self) -> None:
         self.assertEqual(serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]}), {"ok": True})
         self.apply_change.assert_called_once()
+
+
+class StartDateRefreshTests(MockThingsTestCase):
+    """A refresh gives tasks with no start date that are due today a start date of today."""
+
+    def test_inbox_anytime_and_someday_tasks_due_today(self) -> None:
+        self.add_tags("P2", "P3")
+        due = pack_things_date(TODAY)
+        with write_db(self.db_path) as conn:
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, deadline, todayIndex, "
+                "\"index\") VALUES (?, ?, 0, 0, 0, ?, ?, 1, 0)",
+                [("inbox1", "In Inbox", 0, due), ("any1", "Anytime", 1, due), ("some1", "Someday", 2, due)],
+            )
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 't1')", [("inbox1",), ("any1",), ("some1",)])
+            conn.execute("INSERT INTO TMTaskTag VALUES ('task1', 'P2')")  # task1 already compliant.
+        serve.list_response("today")
+        sent = {call[0][0].task_id: call[0][0] for call in self.apply_change.call_args_list}
+        self.assertEqual(set(sent), {"inbox1", "any1", "some1"})
+        for change in sent.values():
+            self.assertEqual(change.set_start_date, TODAY)
+            self.assertIsNone(change.tags)
 
 
 class CompletionTests(MockThingsTestCase):

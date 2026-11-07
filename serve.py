@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): Synchronized module version metadata.
 - v0.1.8 (2026-11-07): Copies of repeating to-dos are no longer refused date
   changes (tested: Things applies them). /api/task also returns today's date
   for the date picker.

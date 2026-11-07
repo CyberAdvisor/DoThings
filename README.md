@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.9 (2026-11-07):** A task with no start date (in the Inbox, Anytime or Someday) that is due today or overdue now gets a start date of today on the next refresh, so it is in Things' own Today too. In the editor, choosing Someday or Anytime for When also removes the deadline.
 - **v0.1.8 (2026-11-07):** When and Deadline open a date picker in the editor: a calendar plus Today, Someday and Anytime (When) or Today and Clear (Deadline). Copies of repeating to-dos are no longer locked; their When and deadline can be changed like any task.
 - **v0.1.7 (2026-11-07):** Click a task to edit it in place, like Things: title, notes, tags, When, deadline, project or area and heading, and priority, with Save and Cancel. Empty fields are added with the buttons at the bottom of the card. **Open in Things** is now in the card. Copies of repeating to-dos can't have their When or deadline changed from Do Things.
 - **v0.1.6 (2026-11-07):** Every task in Today and the P1, P2, P3 and Overdue searches has a checkbox. Checking it completes the task in Things and shows it dim gray and struck through at the bottom of its group until the end of the day; unchecking reopens it. Warning messages after a failed move or check now stay visible.
@@ -23,6 +24,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
   1. A task that is overdue or due today is tagged P1.
   2. A task with more than one P tag keeps only the highest.
   3. A Today task with no P tag is tagged P2.
+  4. A task with no start date (Inbox, Anytime or Someday) that is due today or overdue gets a start date of today.
 - Drag a task to another priority to move it. The move replaces its P tags, and:
   - moving into P1 sets its deadline to today;
   - moving out of P1 removes its deadline, and if the task was in Today only because of its deadline (no start date, or one after today), sets its start date to today so it stays in Today;
@@ -30,7 +32,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
 - Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day. Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
-- Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things. While a card is open, the list doesn't refresh and tasks can't be dragged.
+- Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar; choosing Someday or Anytime also removes the deadline), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things. While a card is open, the list doesn't refresh and tasks can't be dragged.
 - The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things.
 - If the P1, P2 or P3 tag doesn't exist in Things, Do Things changes no tags and shows how to create them.
 

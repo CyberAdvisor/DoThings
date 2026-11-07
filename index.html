@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.8
+  Version: 0.1.9
 
   Change log:
+  - v0.1.9 (2026-11-07): Picking Someday or Anytime for When also removes the
+    deadline (the Deadline row disappears; it can be added back before saving).
   - v0.1.8 (2026-11-07): When and Deadline open a date picker (calendar with
     Today/Someday/Anytime or Clear) instead of a menu and date field. Copies
     of repeating to-dos are no longer locked.
@@ -760,12 +762,21 @@ function closePicker() {
   redrawEditor();
 }
 
-/** Set the chosen date (or keyword for When) and close the picker. */
+/**
+ * Set the chosen date (or keyword for When) and close the picker. Someday and
+ * Anytime also remove the deadline, matching the server's plan_edit rule.
+ */
 function pickDate(which, value) {
-  const { draft, today } = state.edit;
-  if (which === "deadline") draft.deadline = value;
-  else if (value === "someday" || value === "anytime") draft.when = { kind: value, date: null };
-  else draft.when = { kind: value === today ? "today" : "date", date: value };
+  const { draft, today, shown } = state.edit;
+  if (which === "deadline") {
+    draft.deadline = value;
+  } else if (value === "someday" || value === "anytime") {
+    draft.when = { kind: value, date: null };
+    draft.deadline = "";
+    shown.deadline = false;
+  } else {
+    draft.when = { kind: value === today ? "today" : "date", date: value };
+  }
   state.edit.picker = null;
   redrawEditor();
 }

@@ -6,9 +6,13 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): New refresh rule: a task with no start date (Inbox,
+  Anytime or Someday) due today or overdue gets a start date of today.
+  Choosing Someday or Anytime in an edit also clears the deadline, unless the
+  edit sets one.
 - v0.1.8 (2026-11-07): Removed `Task.repeating` and `Change.changes_dates`:
   copies of repeating to-dos can have their dates changed by URL after all.
 - v0.1.7 (2026-11-07): Tasks carry notes, Someday state, list and heading.
@@ -142,16 +146,25 @@ def _with_priority(tags: List[str], priority: str) -> List[str]:
 
 
 def plan_refresh(task: Task, today: date) -> Optional[Change]:
-    """Return the tag change the refresh rules require, or None if compliant.
+    """Return the change the refresh rules require, or None if compliant.
 
-    Completed tasks are left as they are. Refresh changes never touch the deadline.
+    Fixes the priority tags, and gives a task with no start date (Inbox,
+    Anytime or Someday) that is due today or overdue a start date of today,
+    so it is in Things' own Today too. Completed tasks are left as they are.
+    Refresh changes never touch the deadline.
     """
     if task.completed:
         return None
     desired = _with_priority(task.tags, required_priority(task, today))
-    if set(desired) == set(task.tags):
+    tags_wrong = set(desired) != set(task.tags)
+    needs_start = task.start_date is None and task.deadline is not None and task.deadline <= today
+    if not tags_wrong and not needs_start:
         return None
-    return Change(task_id=task.uuid, tags=desired)
+    return Change(
+        task_id=task.uuid,
+        tags=desired if tags_wrong else None,
+        set_start_date=today if needs_start else None,
+    )
 
 
 def plan_move(task: Task, destination: str, today: date) -> Change:
@@ -214,7 +227,8 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
 
     A priority change applies the move rules (plan_move), then the explicit
     fields are layered on top: a deadline or When chosen in the edit wins over
-    what the move rules would set.
+    what the move rules would set. Choosing Someday or Anytime clears the
+    deadline unless the edit also sets one.
     """
     if edit.when_keyword is not None and edit.when_keyword not in WHEN_KEYWORDS:
         raise ValueError(f"Unknown When value: {edit.when_keyword!r}")
@@ -234,6 +248,8 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
         change.set_start_date, change.set_when = edit.when_date, None
     elif edit.when_keyword is not None:
         change.set_start_date, change.set_when = None, edit.when_keyword
+        if edit.deadline is None:
+            change.set_deadline, change.clear_deadline = None, True
     change.set_title = edit.title
     change.set_notes = edit.notes
     change.set_list_id = edit.list_id

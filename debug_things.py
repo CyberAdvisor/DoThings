@@ -5,9 +5,10 @@ exist, whether the P1-P3 tags exist, and every Today task with its tags,
 dates, completion, required priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): The planned change also shows a start date being set.
 - v0.1.8 (2026-11-07): Schema check no longer requires `rt1_repeatingTemplate`.
 - v0.1.7 (2026-11-07): Schema check also requires the `notes` and
   `rt1_repeatingTemplate` columns used by the edit view.
@@ -31,7 +32,7 @@ from common import (
     read_list,
     today_local,
 )
-from priority_check import plan_refresh, required_priority
+from priority_check import Change, plan_refresh, required_priority
 
 # Columns the queries in common.py depend on.
 REQUIRED_COLUMNS = {
@@ -63,6 +64,16 @@ def check_schema(conn: sqlite3.Connection) -> bool:
     return usable
 
 
+def describe_change(change: Change) -> str:
+    """Describe what a refresh change would do, e.g. "retag -> P1; start -> 2026-11-07"."""
+    parts = []
+    if change.tags is not None:
+        parts.append(f"retag -> {', '.join(change.tags)}")
+    if change.set_start_date is not None:
+        parts.append(f"start -> {change.set_start_date.isoformat()}")
+    return "; ".join(parts)
+
+
 def run() -> None:
     """Print the diagnostic report."""
     print(f"Do Things v{PROJECT_VERSION} diagnostic")
@@ -82,7 +93,7 @@ def run() -> None:
     print(f"\nToday tasks: {len(tasks)}")
     for task in tasks:
         change = plan_refresh(task, today)
-        planned = f"retag -> {', '.join(change.tags)}" if change else "no change"
+        planned = describe_change(change) if change else "no change"
         print(
             f"- {task.title!r} [{task.uuid}]\n"
             f"    tags={task.tags} start={task.start_date} deadline={task.deadline} "

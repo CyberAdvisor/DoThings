@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.8
+Version: 0.1.9
 
 Change log:
+- v0.1.9 (2026-11-07): Tests for the start-date refresh rule and for Someday
+  and Anytime clearing the deadline.
 - v0.1.8 (2026-11-07): Removed the Change.changes_dates test with the property.
 - v0.1.7 (2026-11-07): Tests for plan_edit, the new Change fields and
   Change.changes_dates.
@@ -90,6 +92,39 @@ class PlanRefreshTests(unittest.TestCase):
         self.assertEqual(plan_refresh(make_task(tags=["P2"], deadline=YESTERDAY), TODAY).tags, ["P1"])
 
 
+class StartDateRuleTests(unittest.TestCase):
+    """Tasks with no start date that are due today or overdue get a start date of today."""
+
+    def test_no_start_date_due_today_or_overdue_gets_start_today(self) -> None:
+        for deadline in (TODAY, YESTERDAY):
+            with self.subTest(deadline=deadline):
+                change = plan_refresh(make_task(tags=["P1"], deadline=deadline), TODAY)
+                self.assertEqual(change.set_start_date, TODAY)
+                self.assertIsNone(change.tags)  # Already P1, so tags are left alone.
+                self.assertIsNone(change.set_deadline)
+                self.assertFalse(change.clear_deadline)
+
+    def test_combined_with_retag(self) -> None:
+        change = plan_refresh(make_task(tags=["Home"], deadline=TODAY), TODAY)
+        self.assertEqual((change.tags, change.set_start_date), (["Home", "P1"], TODAY))
+
+    def test_someday_counts_too(self) -> None:
+        task = make_task(tags=["P1"], deadline=TODAY)
+        task.someday = True
+        self.assertEqual(plan_refresh(task, TODAY).set_start_date, TODAY)
+
+    def test_left_alone(self) -> None:
+        cases = {
+            "future deadline": make_task(tags=["P2"], deadline=TOMORROW),
+            "no deadline": make_task(tags=["P2"]),
+            "has start date": make_task(tags=["P1"], deadline=TODAY, start_date=YESTERDAY),
+            "completed": make_task(tags=["P1"], deadline=TODAY, completed_at=1.0),
+        }
+        for name, task in cases.items():
+            with self.subTest(name):
+                self.assertIsNone(plan_refresh(task, TODAY))
+
+
 class CompletionTests(unittest.TestCase):
     """Completing and reopening tasks."""
 
@@ -162,6 +197,20 @@ class PlanEditTests(unittest.TestCase):
         change = plan_edit(task, TaskEdit(priority="P3", when_keyword="someday"), TODAY)
         self.assertIsNone(change.set_start_date)
         self.assertEqual(change.set_when, "someday")
+
+    def test_someday_and_anytime_clear_the_deadline(self) -> None:
+        for keyword in ("someday", "anytime"):
+            with self.subTest(keyword=keyword):
+                change = plan_edit(make_task(tags=["P1"], deadline=TODAY, start_date=TODAY),
+                                   TaskEdit(when_keyword=keyword), TODAY)
+                self.assertEqual(change.set_when, keyword)
+                self.assertTrue(change.clear_deadline)
+
+    def test_deadline_set_in_same_edit_is_kept_with_someday(self) -> None:
+        later = TODAY + timedelta(days=9)
+        change = plan_edit(make_task(tags=["P2"], deadline=TODAY), TaskEdit(when_keyword="someday", deadline=later), TODAY)
+        self.assertEqual(change.set_deadline, later)
+        self.assertFalse(change.clear_deadline)
 
     def test_same_priority_is_not_a_move(self) -> None:
         self.assertIsNone(plan_edit(make_task(tags=["P2"]), TaskEdit(priority="P2"), TODAY))

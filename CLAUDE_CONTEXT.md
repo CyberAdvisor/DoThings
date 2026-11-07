@@ -10,8 +10,11 @@ On every list refresh (page load, window focus, every 60 seconds), each Today ta
 1. Overdue or due today → P1.
 2. Several P tags → keep the highest.
 3. No P tag → P2.
+4. No start date (Inbox, Anytime or Someday) and due today or overdue → start date set to today (`when=YYYY-MM-DD`), so it is in Things' own Today too. Combined with any retag into one change.
 
 Refresh changes never touch deadlines.
+
+Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edit`), unless the same edit sets one. The page mirrors this so the Deadline row disappears before saving.
 
 Manual moves:
 - All P tags are replaced with the destination tag.
