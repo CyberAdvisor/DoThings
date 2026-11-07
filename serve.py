@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.21
+Version: 0.1.22
 
 Change log:
+- v0.1.22 (2026-11-07): Today's grouped rows leave out the P1-P3 tags (the
+  group shows the priority); the searches still show them.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
 - v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Rows are sent the way Things shows them: all tags
@@ -147,13 +149,18 @@ class ApiError(Exception):
         self.message = message
 
 
-def task_to_json(task: Task, today: date) -> Dict[str, Any]:
-    """Convert a Task into the JSON shape the page renders, mirroring a Things row."""
+def task_to_json(task: Task, today: date, grouped: bool = False) -> Dict[str, Any]:
+    """Convert a Task into the JSON shape the page renders, mirroring a Things row.
+
+    With `grouped` (Today's priority groups) the P tags are left out, since
+    the group already shows the priority; otherwise all tags are sent.
+    """
+    tags = [t for t in task.tags if t not in PRIORITIES] if grouped else task.tags
     return {
         "id": task.uuid,
         "title": task.title,
         "context": task.context,
-        "tags": task.tags,  # All tags, P tags included, as Things shows them.
+        "tags": tags,
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "deadline_label": deadline_label(task.deadline, today),
         "deadline_state": deadline_state(task.deadline, today),
@@ -317,7 +324,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
             {
                 "priority": p,
                 "label": PRIORITY_LABELS[p],
-                "tasks": [task_to_json(t, today) for t in groups[p]],
+                "tasks": [task_to_json(t, today, grouped=True) for t in groups[p]],
             }
             for p in PRIORITIES
         ]

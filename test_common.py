@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.21
+Version: 0.1.22
 
 Change log:
+- v0.1.22 (2026-11-07): Synchronized module version metadata.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
 - v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Test for the repeating and checklist flags read

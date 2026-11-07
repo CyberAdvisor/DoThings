@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.21
+Version: 0.1.22
 
 Change log:
+- v0.1.22 (2026-11-07): Test that Today's grouped rows leave out P tags and
+  the searches keep them.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
 - v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Tests for Things-style row data: deadline wording,
@@ -346,6 +348,15 @@ class CompletionTests(MockThingsTestCase):
                 self.assertEqual(ids(shown), ["task1", "done1"])
                 self.assertEqual(ids(hidden), ["task1"])
                 self.assertEqual(hidden["counts"], shown["counts"])
+
+    def test_today_rows_hide_p_tags_searches_keep_them(self) -> None:
+        self.add_tags("Home")
+        with write_db(self.db_path) as conn:
+            conn.executemany("INSERT INTO TMTaskTag VALUES ('task1', ?)", [("t1",), ("Home",)])
+        today_row = serve.list_response("today")["groups"][0]["tasks"][0]
+        search_row = serve.list_response("p1")["tasks"][0]
+        self.assertEqual(today_row["tags"], ["Home"])
+        self.assertEqual(sorted(search_row["tags"]), ["Home", "P1"])
 
     def test_completed_task_cannot_be_moved(self) -> None:
         self.add_completed_task("done1")
