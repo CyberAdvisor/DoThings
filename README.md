@@ -71,11 +71,11 @@ The commands in this guide assume that location. If you put it elsewhere, change
 ## 3. Prepare Things and your Mac
 1. **Create the priority tags.** In Things, open **Window › Tags** and create three tags named exactly `P1`, `P2` and `P3`. Things ignores tags that don't exist, so Do Things can't assign priorities until these do. Do Things shows how to create them if any are missing.
 2. **Optional: create the `Sequential` tag** the same way, and add it to any project you want worked in order.
-3. **Give Terminal Full Disk Access.** Things keeps its data in a protected folder.
-   - Open **System Settings › Privacy & Security › Full Disk Access** and turn on **Terminal**. If Terminal isn't listed, add it with **+**.
-   - Quit and reopen Terminal. Turning on the toggle may ask for an administrator password.
-   - Without this, macOS blocks reading the Things data without asking, and Do Things reports "Things database not found".
-4. **Shortcuts needs its own access.** Terminal's access doesn't cover the Do Things shortcut (section 7). Expect a separate macOS prompt the first time the shortcut runs.
+3. **Allow Terminal to read Things' data.** Things keeps its data in a protected folder.
+   - The first time you run Do Things (or `debug_things.py`) from Terminal, macOS asks whether Terminal may access data from other apps. Click **Allow**.
+   - If you missed or declined the prompt, open **System Settings › Privacy & Security › Files & Folders**. Under **Terminal**, turn on **Data shared by Things and affiliated apps**.
+   - Without this, Do Things reports "Things database not found".
+4. **Shortcuts needs the same permission.** Terminal's access doesn't cover the Do Things shortcut (section 7). Expect the same macOS prompt, for Shortcuts, the first time the shortcut runs.
 
 ## 4. First run and the auth token
 1. Open Terminal and start Do Things:

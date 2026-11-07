@@ -33,7 +33,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - `task_order.json`: `{"P1": [ids], "P2": [ids], "P3": [ids]}`. Every list request drops ids no longer in Today (`prune_order`) and saves only if something was dropped. Ids not listed appear after the listed ones, in Things' `todayIndex` order. `update_order` removes moved ids from other groups so an id is never listed twice.
 
 ## Things database facts
-- Reading it needs Full Disk Access for Terminal. Without it, macOS silently blocks access ("Operation not permitted") and the database is reported as not found.
+- Reading it needs macOS permission for the app that starts Do Things: System Settings › Privacy & Security › Files & Folders › (Terminal or Shortcuts) › "Data shared by Things and affiliated apps". macOS asks the first time ("would like to access data from other apps"). Without it, access is blocked and the database is reported as not found. Full Disk Access is not needed (corrected in v1.0.2).
 - Location: `~/Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-*/Things Database.thingsdatabase/main.sqlite`. Older versions have no `ThingsData-*` folder. Both layouts are searched, and the newest file wins.
 - `TMTask`:
   - `type` 0 = to-do.
@@ -70,7 +70,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - Commas between tags are sent unencoded and spaces as `%20`, matching Things' documented format.
 
 ## Architecture notes
-- Permissions (v1.0.1): Terminal needs Full Disk Access; the Do Things shortcut needs its own access. On the shortcut's first run macOS asks whether Shortcuts may access data from other apps; otherwise System Settings › Privacy & Security › Files & Folders › Shortcuts › "Data shared by Things and affiliated apps" (and "Documents"). Without it, a server started by the shortcut reports "Things database not found" even though Terminal works (confirmed 2026-11-07).
+- Permissions (v1.0.1, corrected v1.0.2): Terminal and the Do Things shortcut each need "Data shared by Things and affiliated apps" in Files & Folders (not Full Disk Access). On the shortcut's first run macOS asks whether Shortcuts may access data from other apps; otherwise System Settings › Privacy & Security › Files & Folders › Shortcuts › "Data shared by Things and affiliated apps" (and "Documents"). Without it, a server started by the shortcut reports "Things database not found" even though Terminal works (confirmed 2026-11-07).
 - Change log (v1.0.1): `CHANGELOG.md`, not the README. File header change logs start at v1.0.0.
 - Token in logs (fixed in v1.0.0): `str()` of `CalledProcessError` or `TimeoutExpired` repeats the whole command, so logging the exception from `open` wrote the `things:///update` URL with `auth-token=` to `errors.log`. `open_things_url` logs `describe_open_failure(error)` instead. A test checks the token never appears.
 - Sidebar (v1.0.0): a title block ("Do Things", tagline "Getting Things Done in Things") above the lists; the version at the bottom is a link to `README_URL` (GitHub README, new tab). The README's `screenshots/today.png` was taken with Chrome from the running app against a mock Things database (a sample Vacation project tagged Sequential); retake it the same way if the Today screen changes noticeably.

@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.0.1
+Version: 1.0.2
 
 Change log:
+- v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): today_local and start_of_day use the Mac's time zone instead of
   Mountain Time (LOCAL_TZ removed). Fixed: a failed or timed-out `open` logged
