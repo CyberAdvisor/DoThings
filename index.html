@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.29
+  Version: 1.0.0
 
   Change log:
+  - v1.0.0 (2026-11-07): Sidebar title "Do Things" with the tagline "Getting
+    Things Done in Things"; the version at the bottom links to the README.
   - v0.1.29 (2026-11-07): Synchronized module version metadata.
   - v0.1.28 (2026-11-07): A task a sequential project started shows its place
     after the project name, e.g. "Seq Project · task 2 of 5".
@@ -129,8 +131,12 @@
     border: solid #fff; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg);
   }
   .nav-item .opens-things svg { width: 12px; height: 12px; }
+  .nav-title { padding: 0 10px 16px; }
+  .nav-title .name { font-size: 17px; font-weight: 700; }
+  .nav-title .tagline { color: var(--muted); font-size: 12px; }
   .nav-footer { margin-top: auto; padding: 8px 0; }
-  .nav-footer .version { color: var(--muted); font-size: 12px; padding: 6px 10px 0; }
+  .nav-footer .version { display: block; color: var(--muted); font-size: 12px; padding: 6px 10px 0; text-decoration: none; }
+  .nav-footer .version:hover { text-decoration: underline; }
   /* Settings page */
   .settings h2 { font-size: 15px; margin: 22px 0 6px; }
   .settings p { color: var(--muted); margin: 0 0 10px; }
@@ -378,10 +384,15 @@ function setStatus(text) {
 
 // --- Sidebar ---------------------------------------------------------------
 
+const README_URL = "https://github.com/CyberAdvisor/DoThings#readme";
+
 /** Draw the sidebar, highlighting the current list. */
 function renderSidebar() {
   const nav = document.getElementById("sidebar");
   nav.replaceChildren();
+  const title = el("div", "nav-title");
+  title.append(el("div", "name", "Do Things"), el("div", "tagline", "Getting Things Done in Things"));
+  nav.append(title);
   for (const entry of LISTS) {
     if (entry === null) {
       nav.append(el("div", "nav-gap"), el("div", "nav-heading", "Searches"));
@@ -421,7 +432,13 @@ function renderSidebar() {
   settings.innerHTML = ICONS.settings; // Static icon markup only.
   settings.append(el("span", "", "Settings"));
   settings.onclick = showSettings;
-  footer.append(settings, el("div", "version", state.version ? `Do Things v${state.version}` : ""));
+  // The version opens the README on GitHub in a new tab.
+  const version = el("a", "version", state.version ? `Do Things v${state.version}` : "");
+  version.href = README_URL;
+  version.target = "_blank";
+  version.rel = "noopener";
+  version.title = "Open the Do Things guide";
+  footer.append(settings, version);
   nav.append(footer);
 }
 

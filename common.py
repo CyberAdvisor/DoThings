@@ -3,9 +3,13 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): today_local and start_of_day use the Mac's time zone instead of
+  Mountain Time (LOCAL_TZ removed). Fixed: a failed or timed-out `open` logged
+  the full command, including the auth token; describe_open_failure now logs
+  only the kind of failure.
 - v0.1.29 (2026-11-07): Today (and the P searches) include due tasks the user
   removed from Things' Today (deadlineSuppressionDate ignored); _TODAY_CLAUSE
   replaces _today_clause and _has_column.
@@ -77,7 +81,6 @@ import urllib.parse
 from collections import Counter
 from datetime import date, datetime
 from typing import Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
-from zoneinfo import ZoneInfo
 
 from priority_check import PRIORITIES, Change, Task
 
@@ -101,7 +104,6 @@ THINGS_DB_PATTERNS = (
     os.path.join(THINGS_CONTAINER_PATH, "Things Database.thingsdatabase", "main.sqlite"),
 )
 
-LOCAL_TZ = ZoneInfo("America/Denver")
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 8765
 
@@ -161,8 +163,17 @@ def get_logger() -> logging.Logger:
 
 
 def today_local() -> date:
-    """Return today's date in Mountain Time."""
-    return datetime.now(LOCAL_TZ).date()
+    """Return today's date in the Mac's own time zone."""
+    return date.today()
+
+
+def start_of_day(day: date) -> float:
+    """Return the Unix time of local midnight at the start of `day` (Mac time zone).
+
+    A naive datetime's timestamp() is interpreted in the system time zone,
+    including any daylight-saving change.
+    """
+    return datetime.combine(day, datetime.min.time()).timestamp()
 
 
 # --- Things dates ---------------------------------------------------------
@@ -310,7 +321,7 @@ def _list_query(name: str, today: int) -> Tuple[str, list, str]:
 def read_list(conn: sqlite3.Connection, name: str, today: date) -> List[Task]:
     """Return the open and today-completed to-dos in one of APP_LISTS, in Things' order."""
     where, params, order = _list_query(name, pack_things_date(today))
-    start_of_today = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+    start_of_today = start_of_day(today)
     rows = conn.execute(
         f"{_TASK_SELECT} AND {_ACTIVE} AND ({where}) ORDER BY {order}", [start_of_today] + params
     )
@@ -490,9 +501,26 @@ def open_things_url(url: str, background: bool) -> bool:
         subprocess.run(command, check=True, timeout=10, capture_output=True)
         return True
     except (OSError, subprocess.SubprocessError) as error:
-        # Log the command without the URL, which contains the auth token.
-        get_logger().error("Could not open Things URL (%s): %s", url.split("?")[0], error)
+        # Log the URL without its query, which contains the auth token.
+        get_logger().error(
+            "Could not open Things URL (%s): %s", url.split("?")[0], describe_open_failure(error)
+        )
         return False
+
+
+def describe_open_failure(error: Exception) -> str:
+    """Describe why `open` failed without repeating its command.
+
+    str() of a failed or timed-out subprocess repeats the full command, which
+    here includes the URL and its auth token, so it must never be logged.
+    """
+    if isinstance(error, subprocess.CalledProcessError):
+        return f"open exited with status {error.returncode}"
+    if isinstance(error, subprocess.TimeoutExpired):
+        return f"open timed out after {error.timeout} seconds"
+    if isinstance(error, OSError) and error.strerror:
+        return error.strerror
+    return type(error).__name__
 
 
 def apply_change(change: Change, token: str, db_path: str) -> bool:

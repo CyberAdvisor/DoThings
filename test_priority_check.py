@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Synchronized module version metadata.
 - v0.1.29 (2026-11-07): Tests for sequence_place.
 - v0.1.28 (2026-11-07): Synchronized module version metadata.
 - v0.1.27 (2026-11-07): Tests for in_today, predict, place_in_list and

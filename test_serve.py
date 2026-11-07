@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Midnight comes from start_of_day.
 - v0.1.29 (2026-11-07): Test the marker when the started task isn't first in
   the project.
 - v0.1.28 (2026-11-07): Test that a started sequential task shows its place,
@@ -52,14 +53,13 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
 import serve
 from priority_check import Task
 from common import (
-    LOCAL_TZ,
     Pull,
     START_ANYTIME,
     STATUS_COMPLETED,
@@ -68,6 +68,7 @@ from common import (
     load_pulls,
     pack_things_date,
     save_pulls,
+    start_of_day,
 )
 from test_common import SCHEMA, TODAY, write_db
 
@@ -377,7 +378,7 @@ class CompletionTests(MockThingsTestCase):
 
     def add_completed_task(self, uuid: str) -> None:
         """Add a P1-tagged Today task completed one minute after midnight."""
-        midnight = datetime.combine(TODAY, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+        midnight = start_of_day(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, stopDate, "

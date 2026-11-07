@@ -8,7 +8,7 @@ Guide for contributors and AI agents working on this repository.
 - Reads come from the Things SQLite database, opened read-only. Writes go through `things:///update` URLs handed to macOS `open -g`, authorized by the user's Things auth token.
 - All logic lives in Python. `index.html` only renders lists and sends actions. Where the page needs a rule's result before saving (the inline editor's dates, priority and the row after Save), it asks `POST /api/edit/preview`; it never re-implements a rule.
 - The refresh rules run on every list request (page load, window focus, every 60 seconds), not on a schedule. Sequential projects are stepped first (`step_sequences`), then each Today task gets `plan_refresh`.
-- Target: Python 3.9 (macOS Command Line Tools), standard library only. Times are Mountain Time (`America/Denver`).
+- Target: Python 3.9 (macOS Command Line Tools), standard library only. Times use the Mac's own time zone (`today_local`, `start_of_day`); deviation from the project standard's Mountain Time, so Do Things works for anyone who downloads it.
 - Workflow: change → test → commit → push, in the single folder `~/Documents/Projects/DoThings`.
 - Releases (deviation from the project standard): do not create tags or releases by hand. Bump `VERSION`, make the commit subject `vX.Y.Z: <summary>` and its body the release notes (version, user-visible behavior, safety impact, verification), and push to `main`; `.github/workflows/release.yml` tags that commit and publishes the release. The workflow file lives in `.github/workflows/` because GitHub requires it there.
 
@@ -20,6 +20,7 @@ Guide for contributors and AI agents working on this repository.
 | `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, edit, edit preview, refresh retry, open in Things, token), refresh pause, row JSON |
 | `debug_things.py` | Read-only diagnostic entry point |
 | `index.html` | Page: sidebar with counts, Hide Completed and Settings; Things-style rows; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar; Settings and token setup |
+| `screenshots/today.png` | README screenshot of Today, taken from the running app with sample data (deviation: the only non-root file besides the release workflow) |
 | `test_priority_check.py`, `test_common.py`, `test_serve.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things) |
 | `README.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
 | `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
@@ -35,7 +36,7 @@ Do not weaken any of these without explicit approval:
 - **Only send what Things will apply.** Writes Things would silently ignore (unknown tags, values not in Things' own data) are refused with a message before sending, so an unconfirmed write always means a real problem.
 - **Fail safe on bad data.** An unreadable date counts as no date (never overdue). An unreadable order or token file is logged and ignored.
 - **Local-only server.** Bound to `127.0.0.1`. The Host header must be the server's own address (blocks DNS rebinding). POSTs require the `X-Do-Things: 1` header (blocks cross-site requests). Task ids are validated before they reach a URL or `open`.
-- **Token secrecy.** `auth_token.txt` is mode 0600 and git-ignored. Never log a URL that contains the token.
+- **Token secrecy.** `auth_token.txt` is mode 0600 and git-ignored. Never log a URL that contains the token, and never log `str()` of a subprocess error from `open` (it repeats the command, URL and token); use `describe_open_failure`.
 - **Page rendering.** Task data is inserted with `textContent`, never `innerHTML`. Only static icon markup uses `innerHTML`.
 
 ## Implementation conventions

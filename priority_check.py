@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Synchronized module version metadata.
 - v0.1.29 (2026-11-07): sequence_place: "task N of M" uses the task's position
   in project order.
 - v0.1.28 (2026-11-07): Synchronized module version metadata.

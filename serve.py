@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Synchronized module version metadata.
 - v0.1.29 (2026-11-07): The sequential marker uses sequence_place (position in
   project order, not completed + 1).
 - v0.1.28 (2026-11-07): Rows of tasks a sequential project started carry

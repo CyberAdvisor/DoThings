@@ -3,9 +3,12 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Test that today and midnight follow the system time zone;
+  midnight comes from start_of_day. Test that a failed `open` never logs the
+  auth token.
 - v0.1.29 (2026-11-07): Test that a due task removed from Things' Today is
   still listed.
 - v0.1.28 (2026-11-07): Test for count_completed.
@@ -51,15 +54,18 @@ import logging.handlers
 import os
 import sqlite3
 import stat
+import subprocess
 import tempfile
+import time
 import unittest
 import urllib.parse
 from datetime import date, datetime, timedelta
 from typing import Iterator
+from unittest import mock
+from zoneinfo import ZoneInfo
 
 from common import (
     LOG_MAX_BYTES,
-    LOCAL_TZ,
     Pull,
     START_ANYTIME,
     START_INBOX,
@@ -71,6 +77,7 @@ from common import (
     build_update_url,
     count_completed,
     count_inbox,
+    describe_open_failure,
     get_logger,
     is_valid_task_id,
     load_order,
@@ -78,6 +85,7 @@ from common import (
     load_token,
     missing_priority_tags,
     open_things_db,
+    open_things_url,
     pack_things_date,
     read_checklist_progress,
     read_edit_options,
@@ -88,6 +96,8 @@ from common import (
     save_order,
     save_pulls,
     save_token,
+    start_of_day,
+    today_local,
     unpack_things_date,
     validate_token,
 )
@@ -149,6 +159,62 @@ class TokenTests(unittest.TestCase):
     def test_missing_token_is_none(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             self.assertIsNone(load_token(os.path.join(folder, "none.txt")))
+
+
+class OpenFailureLoggingTests(unittest.TestCase):
+    """A failed `open` is logged without the auth token."""
+
+    URL = "things:///update?id=A1&auth-token=secret-token-123&tags=P2"
+
+    def test_token_never_logged(self) -> None:
+        failures = [
+            subprocess.CalledProcessError(1, ["open", "-g", self.URL]),
+            subprocess.TimeoutExpired(["open", "-g", self.URL], 10),
+            FileNotFoundError(2, "No such file or directory", "open"),
+        ]
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                with mock.patch("common.subprocess.run", side_effect=failure), \
+                        self.assertLogs("dothings", level="ERROR") as logs:
+                    self.assertFalse(open_things_url(self.URL, background=True))
+                logged = "\n".join(logs.output)
+                self.assertNotIn("secret-token-123", logged)
+                self.assertIn("things:///update", logged)
+
+    def test_failure_descriptions(self) -> None:
+        self.assertEqual(
+            describe_open_failure(subprocess.CalledProcessError(1, ["open", self.URL])),
+            "open exited with status 1",
+        )
+        self.assertEqual(
+            describe_open_failure(subprocess.TimeoutExpired(["open", self.URL], 10)),
+            "open timed out after 10 seconds",
+        )
+
+
+class TimeZoneTests(unittest.TestCase):
+    """Today and midnight follow the Mac's own time zone."""
+
+    def setUp(self) -> None:
+        self.saved_tz = os.environ.get("TZ")
+
+    def tearDown(self) -> None:
+        if self.saved_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = self.saved_tz
+        time.tzset()
+
+    def test_today_and_midnight_follow_system_time_zone(self) -> None:
+        # Zones far apart, so at least one is on a different date than Denver.
+        for zone in ("Pacific/Auckland", "America/Denver", "Pacific/Pago_Pago"):
+            with self.subTest(zone=zone):
+                os.environ["TZ"] = zone
+                time.tzset()
+                expected = datetime.now(ZoneInfo(zone)).date()
+                self.assertEqual(today_local(), expected)
+                midnight = datetime.combine(TODAY, datetime.min.time(), tzinfo=ZoneInfo(zone))
+                self.assertEqual(start_of_day(TODAY), midnight.timestamp())
 
 
 class ThingsDateTests(unittest.TestCase):
@@ -344,7 +410,7 @@ class DatabaseTests(unittest.TestCase):
             return [t.uuid for t in read_list(conn, name, TODAY)]
 
     def test_completed_today_listed_earlier_and_canceled_not(self) -> None:
-        midnight = datetime.combine(TODAY, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
+        midnight = start_of_day(TODAY)
         started = pack_things_date(TODAY)
         rows = [
             # uuid, status, stopDate

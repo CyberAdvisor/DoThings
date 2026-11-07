@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.29
+Version: 1.0.0
 
 Change log:
+- v1.0.0 (2026-11-07): Today is labeled with the Mac's time zone.
 - v0.1.29 (2026-11-07): Synchronized module version metadata.
 - v0.1.28 (2026-11-07): Synchronized module version metadata.
 - v0.1.27 (2026-11-07): Synchronized module version metadata.
@@ -111,7 +112,7 @@ def run() -> None:
         return
     print(f"Database: {db_path}")
     today = today_local()
-    print(f"Today (Mountain Time): {today.isoformat()}")
+    print(f"Today (Mac time zone): {today.isoformat()}")
     with open_things_db(db_path) as conn:
         if not check_schema(conn):
             return
