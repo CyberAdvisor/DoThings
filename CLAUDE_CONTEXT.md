@@ -42,16 +42,18 @@ Without the start-date step, clearing the deadline of a deadline-only task would
   - `rt1_recurrenceRule` is non-null on repeating templates, which are excluded.
 - Tags: `TMTaskTag(tasks, tags)` joins `TMTag(uuid, title)`. Tag titles are concatenated with `char(31)` because titles can contain commas.
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).
-- Upcoming = `start = 2` with a future `startDate`. Someday = `start = 2` with no `startDate`.
+- Do Things only queries Today and the searches (`APP_LISTS`). Inbox, Upcoming, Anytime, Someday and Logbook open in Things with `things:///show?id=<list>` (no token needed).
 
 ## Things URL scheme gotchas
 - `tags=` replaces all tags, so always send the full list. Tags are comma-separated, and a tag containing a comma cannot be written, so it is refused.
 - Tags that don't exist in Things are silently ignored. That's why the P1–P3 tags must exist (the UI warns) and why every write is confirmed by re-reading the database.
 - A wrong auth token also fails silently. The only symptom is that the change never appears, which is reported as `write_failed`.
+- Unknown tags are dropped silently, so while P1, P2 or P3 is missing Do Things sends no writes (refresh skipped, moves to a missing priority refused with instructions). Otherwise a missing tag shows up as an unconfirmed write, which looks like a token problem.
 - `deadline=` with an empty value clears the deadline. `when=YYYY-MM-DD` sets the start date.
 - Commas between tags are sent unencoded and spaces as `%20`, matching Things' documented format.
 
 ## Architecture notes
+- A browser that disconnects mid-request raises `ConnectionError` while the reply is sent. `Handler.handle` ignores it, and `_run` sends the reply outside its `try` so it isn't logged as a Things read error.
 - `HTTPServer` is single-threaded on purpose, so writes to Things and to the order file never overlap.
 - Starting `serve.py` when port 8765 is already in use just opens the page and exits. The Shortcut relies on this.
 - Request checks: the Host header must be `127.0.0.1:8765` or `localhost:8765`, and POSTs need `X-Do-Things: 1`.

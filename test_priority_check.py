@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.4
+Version: 0.1.5
 
 Change log:
+- v0.1.5 (2026-11-07): Synchronized module version metadata.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): Synchronized module version metadata.

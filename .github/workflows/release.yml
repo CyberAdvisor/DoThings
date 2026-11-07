@@ -1,8 +1,9 @@
 # Creates the vX.Y.Z tag and GitHub release for each new version pushed to main.
 #
-# Version: 0.1.4
+# Version: 0.1.5
 #
 # Change log:
+# - v0.1.5 (2026-11-07): Synchronized module version metadata.
 # - v0.1.4 (2026-11-07): Initial release.
 #
 # On every push to main it reads VERSION. If the tag for that version does not

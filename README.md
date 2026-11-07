@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.5 (2026-11-07):** Inbox, Upcoming, Anytime, Someday and Logbook now open in Things instead of in Do Things (marked with an arrow in the sidebar). While a P tag is missing in Things, Do Things changes no tags and explains step by step how to create them, instead of reporting a token problem. The token warning now lists what to check, in order. Browser disconnects no longer print errors in Terminal or `errors.log`.
 - **v0.1.4 (2026-11-07):** Pushing a new version to `main` now creates its `vX.Y.Z` tag and GitHub release automatically, with the commit message as the release notes. `.gitignore` now also ignores Python's `__pycache__/` folder.
 - **v0.1.3 (2026-11-07):** Added the missing `.gitignore`, so the auth token, the saved task order and the logs can't be committed by accident.
 - **v0.1.2 (2026-11-07):** To-dos inside a trashed project or heading no longer appear, and the Today, Inbox, Anytime, Upcoming, Someday, P1–P3 and Overdue lists no longer show to-dos whose project or heading is completed or canceled. Setup now covers giving Terminal Full Disk Access, which reading the Things database requires.
@@ -26,7 +27,8 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
 - Shows deadline flags, red when overdue.
 - Click a task to open it in Things for editing.
-- The sidebar has Things' lists (Inbox, Today, Upcoming, Anytime, Someday, Logbook) and the searches P1, P2, P3 and Overdue.
+- The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things.
+- If the P1, P2 or P3 tag doesn't exist in Things, Do Things changes no tags and shows how to create them.
 
 Do Things reads the Things database read-only and makes every change through Things' own URL commands. Each change is only treated as done once Things' database shows it.
 
@@ -95,6 +97,7 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 | `index.html` | The page: sidebar, task lists, drag-and-drop, token setup |
 | `test_priority_check.py` | Tests for the rules |
 | `test_common.py` | Tests for token handling, dates, URLs, the order file and database queries |
+| `test_serve.py` | Tests for the server: missing-tag guards, opening Things lists, browser disconnects |
 | `errors.log`, `run.log` | Runtime logs (untracked) |
 | `task_order.json` | Saved order within each priority (untracked) |
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
@@ -111,7 +114,6 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 - Things' database layout isn't documented and could change with a Things update. `debug_things.py` reports missing columns.
 - Only to-dos are shown, not projects or headings.
 - Today membership is worked out from start dates and deadlines. It may differ slightly from Things in edge cases, such as tasks inside a project that is itself scheduled later.
-- The Logbook shows the most recent 200 entries.
 - The custom searches are fixed (P1, P2, P3, Overdue). New ones are added in code.
 - Each change waits up to 5 seconds for Things to confirm it, so moves take a moment.
 

@@ -3,9 +3,12 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.4
+Version: 0.1.5
 
 Change log:
+- v0.1.5 (2026-11-07): Inbox, Upcoming, Anytime, Someday and Logbook now open in
+  Things, so their queries, LOGBOOK_LIMIT and the constants only they used are
+  removed. build_show_url opens either a task or one of those Things lists.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): To-dos inside a trashed project or heading are no longer
@@ -62,15 +65,15 @@ CONFIRM_POLL_SECONDS = 0.25
 # before it reaches a URL or a shell command.
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
-# Things TMTask column values.
+# Things TMTask column values used by the queries (full list in CLAUDE_CONTEXT.md).
 TYPE_TODO = 0
-STATUS_OPEN, STATUS_CANCELED, STATUS_COMPLETED = 0, 2, 3
-START_INBOX, START_ANYTIME, START_SOMEDAY = 0, 1, 2
+STATUS_OPEN = 0
+START_ANYTIME, START_SOMEDAY = 1, 2
 
-# Built-in Things lists, then the custom searches, in sidebar order.
-BUILTIN_LISTS = ("inbox", "today", "upcoming", "anytime", "someday", "logbook")
-CUSTOM_SEARCHES = ("p1", "p2", "p3", "overdue")
-LOGBOOK_LIMIT = 200
+# Lists Do Things shows itself: Today, then the custom searches.
+APP_LISTS = ("today", "p1", "p2", "p3", "overdue")
+# Built-in Things lists that the sidebar opens in Things (things:///show?id=<list>).
+THINGS_LISTS = ("inbox", "upcoming", "anytime", "someday", "logbook")
 
 
 def load_project_version() -> str:
@@ -176,8 +179,9 @@ WHERE t.type = {TYPE_TODO} AND t.trashed = 0 AND t.rt1_recurrenceRule IS NULL
 
 # A to-do keeps its own status and trashed flag when its project or heading is
 # trashed, completed or canceled, so the parents are checked too: trashed in
-# _TASK_SELECT (every list) and status here (open lists only). A to-do with no
-# project or heading counts as having an open, untrashed parent.
+# _TASK_SELECT (also used by read_task) and status here (every list in
+# APP_LISTS). A to-do with no project or heading counts as having an open,
+# untrashed parent.
 _OPEN_ONLY = (
     f"t.status = {STATUS_OPEN} AND COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} "
     f"AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
@@ -199,7 +203,7 @@ def _row_to_task(row: sqlite3.Row) -> Task:
 
 
 def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, list, str]:
-    """Return (where clause, params, order clause) for a sidebar list or search.
+    """Return (where clause, params, order clause) for one of APP_LISTS.
 
     `today` is today's date in Things' packed format.
     """
@@ -214,20 +218,6 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
             f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
         )
         return where, [today, today], "t.todayIndex, t.\"index\""
-    if name == "inbox":
-        return f"{_OPEN_ONLY} AND t.start = {START_INBOX}", [], "t.\"index\""
-    if name == "anytime":
-        return f"{_OPEN_ONLY} AND t.start = {START_ANYTIME}", [], "t.\"index\""
-    if name == "upcoming":
-        where = f"{_OPEN_ONLY} AND t.start = {START_SOMEDAY} AND t.startDate > ?"
-        return where, [today], "t.startDate, t.todayIndex"
-    if name == "someday":
-        where = f"{_OPEN_ONLY} AND t.start = {START_SOMEDAY} AND t.startDate IS NULL"
-        return where, [], "t.\"index\""
-    if name == "logbook":
-        where = f"t.status IN ({STATUS_CANCELED}, {STATUS_COMPLETED})"
-        # Only the most recent entries; the full logbook can be very long.
-        return where, [], f"t.stopDate DESC LIMIT {LOGBOOK_LIMIT}"
     if name in ("p1", "p2", "p3"):
         where = (
             f"{_OPEN_ONLY} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
@@ -241,7 +231,7 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
 
 
 def read_list(conn: sqlite3.Connection, name: str, today: date) -> List[Task]:
-    """Return the to-dos in a sidebar list or custom search, in display order."""
+    """Return the to-dos in one of APP_LISTS, in display order."""
     where, params, order = _list_query(conn, name, pack_things_date(today))
     rows = conn.execute(f"{_TASK_SELECT} AND {where} ORDER BY {order}", params)
     return [_row_to_task(row) for row in rows]
@@ -285,9 +275,9 @@ def build_update_url(change: Change, token: str) -> str:
     return "things:///update?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe=",")
 
 
-def build_show_url(task_id: str) -> str:
-    """Build the things:///show URL that opens a task in Things."""
-    return "things:///show?" + urllib.parse.urlencode({"id": task_id})
+def build_show_url(target_id: str) -> str:
+    """Build the things:///show URL that opens a task, or one of THINGS_LISTS, in Things."""
+    return "things:///show?" + urllib.parse.urlencode({"id": target_id})
 
 
 def open_things_url(url: str, background: bool) -> bool:

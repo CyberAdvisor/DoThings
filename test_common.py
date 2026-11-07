@@ -3,9 +3,12 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.4
+Version: 0.1.5
 
 Change log:
+- v0.1.5 (2026-11-07): Dropped tests for the lists that now open in Things;
+  Things schema values not used by common.py are defined here; test for
+  opening a Things list by URL.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): Tests that to-dos under a trashed, completed or canceled
@@ -24,11 +27,9 @@ from datetime import date, timedelta
 
 from common import (
     START_ANYTIME,
-    START_INBOX,
     START_SOMEDAY,
-    STATUS_CANCELED,
-    STATUS_COMPLETED,
     STATUS_OPEN,
+    THINGS_LISTS,
     build_show_url,
     build_update_url,
     is_valid_task_id,
@@ -47,6 +48,10 @@ from common import (
 from priority_check import Change
 
 TODAY = date(2026, 11, 7)
+
+# Things values the mock data needs that common.py's queries don't use.
+START_INBOX = 0
+STATUS_CANCELED, STATUS_COMPLETED = 2, 3
 
 SCHEMA = """
 CREATE TABLE TMTask (
@@ -137,6 +142,8 @@ class UrlTests(unittest.TestCase):
 
     def test_show_url(self) -> None:
         self.assertEqual(build_show_url("A1"), "things:///show?id=A1")
+        for name in THINGS_LISTS:
+            self.assertEqual(build_show_url(name), f"things:///show?id={name}")
 
     def test_task_id_validation(self) -> None:
         self.assertTrue(is_valid_task_id("7Xn3kQpL2mR9sT4vW8yZ1a"))
@@ -240,26 +247,19 @@ class DatabaseTests(unittest.TestCase):
     def test_today_membership_and_order(self) -> None:
         self.assertEqual(self._ids("today"), ["today2", "today1", "overdue"])
 
-    def test_other_lists(self) -> None:
-        self.assertEqual(self._ids("inbox"), ["inbox"])
-        self.assertEqual(self._ids("upcoming"), ["future"])
-        self.assertEqual(self._ids("someday"), ["someday"])
-        self.assertEqual(self._ids("logbook"), ["done"])
-        self.assertEqual(set(self._ids("anytime")), {"today1", "today2", "overdue", "anytime"})
-
     def test_custom_searches(self) -> None:
         self.assertEqual(self._ids("p1"), ["today1"])
         self.assertEqual(self._ids("p2"), ["anytime"])
         self.assertEqual(self._ids("overdue"), ["overdue"])
 
     def test_todos_under_closed_or_trashed_parents_hidden(self) -> None:
-        # Today, P1, Anytime and Logbook are checked against the expected lists
-        # in the tests above; this names the hidden to-dos explicitly.
+        # Today and P1 are checked against the expected lists in the tests
+        # above; this names the hidden to-dos explicitly.
         hidden = {
             "in_trashproj", "in_doneproj", "in_cancelproj",
             "in_trashhead", "in_donehead", "in_headintrash", "done_in_trashproj",
         }
-        for name in ("today", "anytime", "p1", "logbook"):
+        for name in ("today", "p1", "overdue"):
             with self.subTest(name=name):
                 self.assertFalse(hidden & set(self._ids(name)))
 
@@ -278,8 +278,10 @@ class DatabaseTests(unittest.TestCase):
             conn.execute("DELETE FROM TMTask")
 
     def test_unknown_list_rejected(self) -> None:
-        with open_things_db(self.path) as conn, self.assertRaises(ValueError):
-            read_list(conn, "nope", TODAY)
+        with open_things_db(self.path) as conn:
+            for name in ("nope",) + THINGS_LISTS:
+                with self.assertRaises(ValueError):
+                    read_list(conn, name, TODAY)
 
 
 if __name__ == "__main__":

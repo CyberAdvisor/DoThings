@@ -19,7 +19,7 @@ Guide for contributors and AI agents working on this repository.
 | `serve.py` | Entry point: HTTP handler, request checks, API routes |
 | `debug_things.py` | Read-only diagnostic entry point |
 | `index.html` | Page: sidebar, lists, drag-and-drop, token setup |
-| `test_priority_check.py`, `test_common.py` | Unit tests (`test_common.py` builds a mock Things database) |
+| `test_priority_check.py`, `test_common.py`, `test_serve.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things) |
 | `README.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
 | `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
 
@@ -39,13 +39,15 @@ Do not weaken any of these without explicit approval:
 - Rules belong in `priority_check.py` and must stay free of I/O so they can be tested.
 - Database, file and command access belong in `common.py`. `serve.py` only wires requests to them.
 - All paths are `*_PATH` constants in `common.py` built from `BASE_DIR`.
-- New sidebar searches: add the id to `CUSTOM_SEARCHES` and a branch in `_list_query` (`common.py`), add an entry to `LISTS` in `index.html`, and add a test in `test_common.py`.
+- New sidebar searches: add the id to `APP_LISTS` and a branch in `_list_query` (`common.py`), add an entry to `LISTS` in `index.html`, and add a test in `test_common.py`.
+- Things' own lists (Inbox, Upcoming, Anytime, Someday, Logbook) are not queried: they are in `THINGS_LISTS` and open in Things via `/api/show-list`. Mark such entries `things: true` in `LISTS`.
+- Never send a write while a P tag is missing in Things (`missing_priority_tags`): Things drops unknown tags silently, so the write can't be confirmed and looks like a token failure.
 - Things stores `startDate` and `deadline` as packed integers (`year<<16 | month<<12 | day<<7`). Use `pack_things_date` and `unpack_things_date`.
 
 ## Verification
 Run all of these before every commit:
 ```
-PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py serve.py debug_things.py test_common.py test_priority_check.py
+PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py serve.py debug_things.py test_common.py test_priority_check.py test_serve.py
 python3 -m unittest discover -p 'test_*.py'
 git diff --check
 git status --short

@@ -2,13 +2,20 @@
 
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves and reorders tasks, opens
-tasks in Things, and stores the Things auth token on first run.
+tasks and Things' own lists in Things, and stores the Things auth token on
+first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.4
+Version: 0.1.5
 
 Change log:
+- v0.1.5 (2026-11-07): New /api/show-list opens Inbox, Upcoming, Anytime,
+  Someday or Logbook in Things; /api/list serves only Today and the searches.
+  While a P tag is missing in Things, refresh rules are skipped and a move to
+  that priority is refused with instructions, so a missing tag is no longer
+  reported as a token problem. A browser that disconnects before its reply is
+  ignored instead of being logged as a Things read error.
 - v0.1.4 (2026-11-07): Synchronized module version metadata.
 - v0.1.3 (2026-11-07): Synchronized module version metadata.
 - v0.1.2 (2026-11-07): Synchronized module version metadata.
@@ -27,12 +34,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from common import (
-    BUILTIN_LISTS,
-    CUSTOM_SEARCHES,
+    APP_LISTS,
     INDEX_HTML_PATH,
     PROJECT_VERSION,
     SERVER_HOST,
     SERVER_PORT,
+    THINGS_LISTS,
     apply_change,
     build_show_url,
     find_things_db_path,
@@ -111,12 +118,17 @@ def require_db_path() -> str:
     return path
 
 
-def apply_refresh_rules(db_path: str, token: Optional[str], today: date) -> bool:
+def apply_refresh_rules(
+    db_path: str, token: Optional[str], today: date, missing_tags: List[str]
+) -> bool:
     """Apply the refresh rules to every Today task. Returns True if a write failed.
 
-    Stops at the first failed write so a bad token does not stall every refresh.
+    Skipped while any P tag is missing in Things: Things silently ignores
+    unknown tags, so the write could never be confirmed and would look like a
+    token problem. Stops at the first failed write so a bad token does not
+    stall every refresh.
     """
-    if token is None:
+    if token is None or missing_tags:
         return False
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, "today", today)
@@ -128,16 +140,17 @@ def apply_refresh_rules(db_path: str, token: Optional[str], today: date) -> bool
 
 
 def list_response(name: str) -> Dict[str, Any]:
-    """Build the JSON for a sidebar list, applying the refresh rules first."""
-    if name not in BUILTIN_LISTS + CUSTOM_SEARCHES:
+    """Build the JSON for Today or a search, applying the refresh rules first."""
+    if name not in APP_LISTS:
         raise ApiError(404, f"Unknown list: {name}")
     db_path = require_db_path()
     token = load_token()
     today = today_local()
-    write_failed = apply_refresh_rules(db_path, token, today)
+    with open_things_db(db_path) as conn:
+        missing = missing_priority_tags(conn)
+    write_failed = apply_refresh_rules(db_path, token, today, missing)
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, name, today)
-        missing = missing_priority_tags(conn)
     response: Dict[str, Any] = {
         "name": name,
         "token_set": token is not None,
@@ -183,8 +196,12 @@ def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     today = today_local()
     with open_things_db(db_path) as conn:
         task = read_task(conn, task_id)
+        missing = missing_priority_tags(conn)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
+    if priority in missing:
+        # Things would silently drop the unknown tag, so the move could never be confirmed.
+        raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
     if not apply_change(plan_move(task, priority, today), token, db_path):
         # Order is only recorded after Things confirms the move.
         return {"ok": False, "write_failed": True}
@@ -207,6 +224,14 @@ def open_task(body: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": open_things_url(build_show_url(task_id), background=False)}
 
 
+def show_list(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Open one of Things' own lists (Inbox, Upcoming, ...) in Things."""
+    name = body.get("name")
+    if name not in THINGS_LISTS:
+        raise ApiError(400, "Unknown Things list.")
+    return {"ok": open_things_url(build_show_url(name), background=False)}
+
+
 def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
     """Validate and save the Things auth token."""
     try:
@@ -220,12 +245,24 @@ POST_ROUTES = {
     "/api/move": move_task,
     "/api/order": reorder_tasks,
     "/api/open": open_task,
+    "/api/show-list": show_list,
     "/api/token": set_token,
 }
 
 
 class Handler(BaseHTTPRequestHandler):
     """Serves the page and the JSON API to the local browser only."""
+
+    def handle(self) -> None:
+        """Handle a request, ignoring a browser that disconnects before the reply.
+
+        The page drops requests when it reloads or loses focus mid-request; that
+        is normal and not an error worth a traceback or an errors.log entry.
+        """
+        try:
+            super().handle()
+        except ConnectionError:
+            pass
 
     def do_GET(self) -> None:  # noqa: N802 (name required by http.server)
         """Serve the page, the status, or a task list."""
@@ -279,14 +316,19 @@ class Handler(BaseHTTPRequestHandler):
         return body
 
     def _run(self, action: Callable[[], Dict[str, Any]]) -> None:
-        """Run an API action and send its result or error as JSON."""
+        """Run an API action and send its result or error as JSON.
+
+        The reply is sent outside the try block so that a browser disconnecting
+        during the send is not mistaken for a failure to read Things.
+        """
         try:
-            self._send_json(200, action())
+            status, payload = 200, action()
         except ApiError as error:
-            self._send_json(error.status, {"error": error.message})
+            status, payload = error.status, {"error": error.message}
         except (sqlite3.Error, OSError) as error:
             get_logger().error("Request %s %s failed: %s", self.command, self.path, error)
-            self._send_json(500, {"error": "Could not read Things. See errors.log."})
+            status, payload = 500, {"error": "Could not read Things. See errors.log."}
+        self._send_json(status, payload)
 
     def _send_page(self) -> None:
         """Send index.html."""
