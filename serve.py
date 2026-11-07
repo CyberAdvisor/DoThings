@@ -8,9 +8,12 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.15
+Version: 0.1.16
 
 Change log:
+- v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Each
+  refresh first gives every sequential project's next undated task a start
+  date of today, then applies the Today rules (so it is also tagged P2).
 - v0.1.15 (2026-11-07): Today shows only the next task of each sequential
   project (due or overdue tasks always show), and tasks of the same project
   follow the project's manual order within each priority group. The Today
@@ -77,7 +80,7 @@ from common import (
     read_checklist_progress,
     read_edit_options,
     read_list,
-    read_next_tasks,
+    read_sequential_projects,
     read_task,
     save_order,
     save_token,
@@ -93,11 +96,11 @@ from priority_check import (
     deadline_state,
     group_today,
     in_project_order,
-    next_in_sequence,
     plan_completion,
     plan_edit,
     plan_move,
     plan_refresh,
+    plan_sequence,
     required_priority,
     today_counts,
     update_order,
@@ -162,15 +165,23 @@ def require_db_path() -> str:
 def apply_refresh_rules(
     db_path: str, token: Optional[str], today: date, missing_tags: List[str]
 ) -> bool:
-    """Apply the refresh rules to every Today task. Returns True if a write failed.
+    """Apply the refresh rules. Returns True if a write failed.
 
-    Skipped while any P tag is missing in Things: Things silently ignores
-    unknown tags, so the write could never be confirmed and would look like a
-    token problem. Stops at the first failed write so a bad token does not
-    stall every refresh.
+    First each sequential project's next undated task gets a start date of
+    today (plan_sequence), then every Today task, including those, gets the
+    Today rules (plan_refresh). Skipped while any P tag is missing in Things:
+    Things silently ignores unknown tags, so the write could never be
+    confirmed and would look like a token problem. Stops at the first failed
+    write so a bad token does not stall every refresh.
     """
     if token is None or missing_tags:
         return False
+    with open_things_db(db_path) as conn:
+        projects = read_sequential_projects(conn)
+    pulls = [plan_sequence(tasks, today) for tasks in projects.values()]
+    for change in filter(None, pulls):
+        if not apply_change(change, token, db_path):
+            return True
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, "today", today)
     for task in tasks:
@@ -181,16 +192,8 @@ def apply_refresh_rules(
 
 
 def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:
-    """Read Today as Do Things shows it.
-
-    Sequential projects show only their next task (due or overdue tasks
-    always show), and tasks of the same project follow the project's manual
-    order. The refresh rules still see every Today task (read_list).
-    """
-    tasks = read_list(conn, "today", today)
-    sequential_projects = {t.project_id for t in tasks if t.sequential}
-    tasks = next_in_sequence(tasks, read_next_tasks(conn, sequential_projects), today)
-    return in_project_order(tasks)
+    """Read Today as Do Things shows it: tasks of the same project in the project's manual order."""
+    return in_project_order(read_list(conn, "today", today))
 
 
 def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:

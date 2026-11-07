@@ -6,9 +6,13 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.15
+Version: 0.1.16
 
 Change log:
+- v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Instead
+  `plan_sequence` gives the project's next undated task a start date of
+  today (one at a time); dated tasks behave as normal. Removed
+  `next_in_sequence` and `Task.sequential`.
 - v0.1.15 (2026-11-07): Tasks carry their project, position in it and
   whether the project is sequential. `in_project_order` orders tasks of the
   same project by the project's manual order; `next_in_sequence` hides tasks
@@ -73,7 +77,6 @@ class Task:
     # Position in the project's manual order: (0 = no heading / 1 = under a heading,
     # heading position, position within the heading or the project).
     project_rank: Tuple[int, int, int] = (0, 0, 0)
-    sequential: bool = False  # Its project is tagged as sequential.
 
     @property
     def completed(self) -> bool:
@@ -325,21 +328,37 @@ def in_project_order(tasks: List[Task]) -> List[Task]:
     return result
 
 
-def next_in_sequence(tasks: Iterable[Task], next_ids: Dict[str, str], today: date) -> List[Task]:
-    """Leave out tasks of sequential projects that aren't the project's next task.
+def is_next_candidate(task: Task, today: date) -> bool:
+    """True if `task` can be its sequential project's task in progress.
 
-    `next_ids` maps each sequential project to its first open task (in project
-    order). A task due today or overdue is always kept, so no deadline is
-    hidden, and so are completed tasks (already done today).
+    That is an open task with no deadline, not in Someday, and with no start
+    date or one of today or earlier (so it is, or can be put, in Today).
+    Tasks with a deadline or a later start follow their own dates instead.
     """
-    def keep(task: Task) -> bool:
-        if not task.sequential or task.completed:
-            return True
-        if task.deadline is not None and task.deadline <= today:
-            return True
-        return next_ids.get(task.project_id) == task.uuid
+    if task.completed or task.deadline is not None or task.someday:
+        return False
+    return task.start_date is None or task.start_date <= today
 
-    return [t for t in tasks if keep(t)]
+
+def sequence_next(project_tasks: Iterable[Task], today: date) -> Optional[Task]:
+    """Return a sequential project's task in progress: its first candidate in project order."""
+    for task in sorted(project_tasks, key=lambda t: t.project_rank):
+        if is_next_candidate(task, today):
+            return task
+    return None
+
+
+def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change]:
+    """Return the change that puts a sequential project's next task in Today, if needed.
+
+    The task in progress (sequence_next) gets a start date of today when it
+    has none. While it is open nothing else is pulled in; once it is done the
+    next undated task is.
+    """
+    task = sequence_next(project_tasks, today)
+    if task is None or task.start_date is not None:
+        return None
+    return Change(task_id=task.uuid, tags=None, set_start_date=today)
 
 
 def completed_last(tasks: List[Task]) -> List[Task]:

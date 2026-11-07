@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.15
+Version: 0.1.16
 
 Change log:
+- v0.1.16 (2026-11-07): Sequence tests now cover plan_sequence and
+  sequence_next instead of hiding.
 - v0.1.15 (2026-11-07): Tests for in_project_order and next_in_sequence.
 - v0.1.14 (2026-11-07): Tests for deferral moving an earlier deadline.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
@@ -37,12 +39,13 @@ from priority_check import (
     deadline_state,
     group_today,
     in_project_order,
-    next_in_sequence,
     plan_completion,
     plan_edit,
     plan_move,
     plan_refresh,
+    plan_sequence,
     required_priority,
+    sequence_next,
     today_counts,
     update_order,
 )
@@ -134,10 +137,10 @@ class StartDateRuleTests(unittest.TestCase):
                 self.assertIsNone(plan_refresh(task, TODAY))
 
 
-def in_project(uuid: str, project: str, rank, sequential: bool = False, **kwargs) -> Task:
+def in_project(uuid: str, project: str, rank, **kwargs) -> Task:
     """Build a task in `project` at `rank` (see Task.project_rank)."""
     task = make_task(uuid, **kwargs)
-    task.project_id, task.project_rank, task.sequential = project, rank, sequential
+    task.project_id, task.project_rank = project, rank
     return task
 
 
@@ -161,27 +164,41 @@ class ProjectOrderTests(unittest.TestCase):
 
 
 class SequenceTests(unittest.TestCase):
-    """Sequential projects show only their next task in Today."""
+    """Sequential projects: the next undated task gets a start date of today, one at a time."""
 
-    def test_only_next_task_shown(self) -> None:
-        tasks = [
-            in_project("first", "S", (0, 0, 1), True),
-            in_project("second", "S", (0, 0, 2), True),
-            in_project("plain", "P", (0, 0, 9)),
-            make_task("loose"),
-        ]
-        kept = next_in_sequence(tasks, {"S": "first"}, TODAY)
-        self.assertEqual([t.uuid for t in kept], ["first", "plain", "loose"])
+    def test_first_undated_task_gets_start_today(self) -> None:
+        tasks = [in_project("second", "S", (0, 0, 2)), in_project("first", "S", (0, 0, 1))]
+        change = plan_sequence(tasks, TODAY)
+        self.assertEqual((change.task_id, change.set_start_date, change.tags), ("first", TODAY, None))
 
-    def test_due_and_completed_tasks_always_shown(self) -> None:
+    def test_nothing_new_while_task_in_progress(self) -> None:
+        tasks = [in_project("first", "S", (0, 0, 1), start_date=TODAY), in_project("second", "S", (0, 0, 2))]
+        self.assertEqual(sequence_next(tasks, TODAY).uuid, "first")
+        self.assertIsNone(plan_sequence(tasks, TODAY))
+
+    def test_next_after_completion(self) -> None:
+        tasks = [in_project("first", "S", (0, 0, 1), start_date=TODAY, completed_at=1.0),
+                 in_project("second", "S", (0, 0, 2))]
+        self.assertEqual(plan_sequence(tasks, TODAY).task_id, "second")
+
+    def test_dated_and_someday_tasks_are_skipped(self) -> None:
+        someday = in_project("someday", "S", (0, 0, 3))
+        someday.someday = True
         tasks = [
-            in_project("due", "S", (0, 0, 2), True, deadline=TODAY),
-            in_project("overdue", "S", (0, 0, 3), True, deadline=YESTERDAY),
-            in_project("later", "S", (0, 0, 4), True, deadline=TOMORROW),
-            in_project("done", "S", (0, 0, 5), True, completed_at=1.0),
+            in_project("deadline", "S", (0, 0, 1), deadline=TOMORROW),
+            in_project("future", "S", (0, 0, 2), start_date=TOMORROW),
+            someday,
+            in_project("plain", "S", (1, 0, 0)),  # Under a heading: after the unheaded tasks.
         ]
-        kept = next_in_sequence(tasks, {"S": "elsewhere"}, TODAY)
-        self.assertEqual([t.uuid for t in kept], ["due", "overdue", "done"])
+        self.assertEqual(plan_sequence(tasks, TODAY).task_id, "plain")
+
+    def test_started_earlier_counts_as_in_progress(self) -> None:
+        tasks = [in_project("old", "S", (0, 0, 1), start_date=YESTERDAY), in_project("next", "S", (0, 0, 2))]
+        self.assertIsNone(plan_sequence(tasks, TODAY))
+
+    def test_nothing_to_do(self) -> None:
+        self.assertIsNone(plan_sequence([], TODAY))
+        self.assertIsNone(plan_sequence([in_project("due", "S", (0, 0, 1), deadline=TODAY)], TODAY))
 
 
 class TodayCountsTests(unittest.TestCase):

@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.15
+Version: 0.1.16
 
 Change log:
+- v0.1.16 (2026-11-07): Sequential project tests now check that the next
+  undated task gets a start date of today, one at a time.
 - v0.1.15 (2026-11-07): Tests for sequential projects and project order in Today.
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
@@ -150,7 +152,7 @@ class CountsTests(MockThingsTestCase):
 
 
 class ProjectTests(MockThingsTestCase):
-    """Project order and sequential projects in Today."""
+    """Project order in Today, and sequential projects starting their next task."""
 
     def setUp(self) -> None:
         super().setUp()
@@ -163,35 +165,49 @@ class ProjectTests(MockThingsTestCase):
                 [("seq", "Sequential project"), ("plain", "Plain project")],
             )
             conn.execute("INSERT INTO TMTaskTag VALUES ('seq', 'Sequential')")
-            # todayIndex order is the reverse of project order.
-            rows = [("s1", "seq", 1, 9), ("s2", "seq", 2, 8), ("s3", "seq", 3, 7),
-                    ("p1", "plain", 1, 6), ("p2", "plain", 2, 5)]
+            # Plain project tasks are in Today; todayIndex order is the reverse of project order.
             conn.executemany(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, project, "
-                f"\"index\", todayIndex) VALUES (?, ?, 0, 0, 0, 1, {started}, ?, ?, ?)",
-                [(u, u, p, i, ti) for u, p, i, ti in rows],
+                f"\"index\", todayIndex) VALUES (?, ?, 0, 0, 0, 1, {started}, 'plain', ?, ?)",
+                [("p1", "p1", 1, 6), ("p2", "p2", 2, 5)],
             )
-            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 'P2')", [(r[0],) for r in rows])
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 'P2')", [("p1",), ("p2",)])
+            # Sequential project: three undated Anytime tasks.
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, project, \"index\") "
+                "VALUES (?, ?, 0, 0, 0, 1, 'seq', ?)",
+                [("s1", "s1", 1), ("s2", "s2", 2), ("s3", "s3", 3)],
+            )
 
-    def p2_ids(self) -> list:
-        """Ids in Today's P2 group, in display order."""
-        return [t["id"] for t in serve.list_response("today")["groups"][1]["tasks"]]
+    def started(self) -> list:
+        """Ids the refresh sent a start date of today for."""
+        return [c[0][0].task_id for c in self.apply_change.call_args_list if c[0][0].set_start_date == TODAY]
 
-    def test_sequential_shows_next_and_plain_follows_project_order(self) -> None:
-        self.assertEqual(self.p2_ids(), ["p1", "p2", "s1"])
-        self.assertEqual(serve.list_response("today")["counts"]["today"], {"due": 0, "not_due": 3})
-
-    def test_due_task_later_in_sequence_shows(self) -> None:
-        with write_db(self.db_path) as conn:
-            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 's3'", (pack_things_date(TODAY),))
+    def test_plain_project_follows_project_order(self) -> None:
         groups = serve.list_response("today")["groups"]
-        self.assertEqual([t["id"] for t in groups[0]["tasks"]], ["s3"])  # Due today, so in Due Today.
-        self.assertEqual([t["id"] for t in groups[1]["tasks"]], ["p1", "p2", "s1"])
+        self.assertEqual([t["id"] for t in groups[1]["tasks"]][:2], ["p1", "p2"])
 
-    def test_next_task_advances_when_first_is_done(self) -> None:
+    def test_first_undated_task_is_started(self) -> None:
+        serve.list_response("today")
+        self.assertEqual(self.started(), ["s1"])
+
+    def test_one_at_a_time_then_next(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 's1'", (pack_things_date(TODAY),))
+        serve.list_response("today")
+        self.assertEqual(self.started(), [])  # s1 is in progress.
         with write_db(self.db_path) as conn:
             conn.execute("UPDATE TMTask SET status = 3, stopDate = 0 WHERE uuid = 's1'")
-        self.assertEqual(self.p2_ids(), ["p1", "p2", "s2"])
+        serve.list_response("today")
+        self.assertEqual(self.started(), ["s2"])
+
+    def test_dated_tasks_left_alone(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 's1'", (pack_things_date(TODAY),))
+        serve.list_response("today")
+        # s1 has a deadline, so it follows its own dates (rule 4 starts it as due today);
+        # s2 is the next undated task.
+        self.assertEqual(self.started(), ["s2", "s1"])
 
 
 class CompletionTests(MockThingsTestCase):

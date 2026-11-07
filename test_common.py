@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.15
+Version: 0.1.16
 
 Change log:
+- v0.1.16 (2026-11-07): read_sequential_projects test replaces read_next_tasks.
 - v0.1.15 (2026-11-07): Tests for project position, the Sequential tag and
   read_next_tasks.
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
@@ -60,7 +61,7 @@ from common import (
     read_checklist_progress,
     read_edit_options,
     read_list,
-    read_next_tasks,
+    read_sequential_projects,
     read_task,
     save_order,
     save_token,
@@ -386,40 +387,35 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(read_checklist_progress(conn, "today1"), {"done": 2, "total": 3})
             self.assertEqual(read_checklist_progress(conn, "today2"), {"done": 0, "total": 0})
 
-    def test_project_fields_and_next_tasks(self) -> None:
+    def test_project_fields_and_sequential_projects(self) -> None:
         with write_db(self.path) as conn:
             conn.execute("INSERT INTO TMTag VALUES ('tseq', 'Sequential')")
-            conn.execute(
-                "INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") VALUES ('seq', 'Seq', 1, 0, 0, 0)"
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") VALUES (?, ?, 1, ?, 0, 0)",
+                [("seq", "Seq", STATUS_OPEN), ("closed", "Closed", STATUS_COMPLETED)],
             )
-            conn.execute("INSERT INTO TMTaskTag VALUES ('seq', 'tseq')")
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 'tseq')", [("seq",), ("closed",)])
             conn.executemany(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, project, heading, \"index\") "
                 "VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
                 [
-                    ("hA", "Heading A", 2, STATUS_OPEN, "seq", None, 2),
                     ("hB", "Heading B", 2, STATUS_OPEN, "seq", None, 1),
                     ("s_done", "Done", 0, STATUS_COMPLETED, "seq", None, 0),
                     ("s_top", "Top", 0, STATUS_OPEN, "seq", None, 5),
                     ("s_b", "Under B", 0, STATUS_OPEN, None, "hB", 0),
-                    ("s_a", "Under A", 0, STATUS_OPEN, None, "hA", 0),
+                    ("c_task", "In closed project", 0, STATUS_OPEN, "closed", None, 0),
                 ],
             )
         with open_things_db(self.path) as conn:
             top, under_b = read_task(conn, "s_top"), read_task(conn, "s_b")
-            self.assertEqual((top.project_id, top.project_rank, top.sequential), ("seq", (0, 0, 5), True))
+            self.assertEqual((top.project_id, top.project_rank), ("seq", (0, 0, 5)))
             self.assertEqual((under_b.project_id, under_b.project_rank), ("seq", (1, 1, 0)))
-            self.assertFalse(read_task(conn, "today1").sequential)  # proj1 isn't tagged.
             self.assertEqual(read_task(conn, "today1").project_id, "proj1")
             self.assertIsNone(read_task(conn, "today2").project_id)  # In an area only.
-            # Next = first open task: unheaded tasks first (s_top), skipping the completed one.
-            self.assertEqual(read_next_tasks(conn, ["seq"]), {"seq": "s_top"})
-        with write_db(self.path) as conn:
-            conn.execute("UPDATE TMTask SET status = 3 WHERE uuid = 's_top'")
-        with open_things_db(self.path) as conn:
-            # Then the first heading in heading order (B, index 1), not insertion order.
-            self.assertEqual(read_next_tasks(conn, ["seq"]), {"seq": "s_b"})
-            self.assertEqual(read_next_tasks(conn, []), {})
+            projects = read_sequential_projects(conn)
+        # Only the open, tagged project; only its open to-dos (headings themselves aren't to-dos).
+        self.assertEqual(set(projects), {"seq"})
+        self.assertEqual(sorted(t.uuid for t in projects["seq"]), ["s_b", "s_top"])
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:
