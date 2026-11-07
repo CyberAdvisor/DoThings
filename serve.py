@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.25
+Version: 0.1.26
 
 Change log:
+- v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): P tags are also left out in the P1-P3 searches (the

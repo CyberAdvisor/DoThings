@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.26 (2026-11-07):** Fixed: **+ Deadline** and **+ When** in the editor did nothing. The calendar opened and closed again on the same click.
 - **v0.1.25 (2026-11-07):** Moving a task into or out of P1 keeps a deadline that is after today. Moving into P1 sets the deadline to today only when there is none; moving out of P1 removes it only when it is today or overdue.
 - **v0.1.24 (2026-11-07):** The P1, P2 and P3 searches list only tasks that are in Today. A tagged task that starts later (for example, deferred to tomorrow) no longer shows in its search until its start date.
 - **v0.1.23 (2026-11-07):** The P1, P2 and P3 searches also hide the P tag on each row (the search name already says it). Only the Overdue search, which mixes priorities, shows it.

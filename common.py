@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.25
+Version: 0.1.26
 
 Change log:
+- v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): P1-P3 searches list only tasks in Today (Today's clause shared via _today_clause).
 - v0.1.23 (2026-11-07): Synchronized module version metadata.

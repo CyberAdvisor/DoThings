@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.25
+Version: 0.1.26
 
 Change log:
+- v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): plan_move keeps a deadline after today when moving into or out of P1; only a missing deadline is set (into P1) and only one of today or earlier is cleared (out of P1).
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): Synchronized module version metadata.

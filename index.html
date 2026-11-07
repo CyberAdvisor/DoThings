@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.25
+  Version: 0.1.26
 
   Change log:
+  - v0.1.26 (2026-11-07): + Deadline and + When open the date picker again; the
+    click that opened it no longer counted as a click outside and closed it.
   - v0.1.25 (2026-11-07): Editor note on priority changes describes the kept later deadline.
   - v0.1.24 (2026-11-07): Synchronized module version metadata.
   - v0.1.23 (2026-11-07): After saving an edit, the row shows a P tag only in
@@ -1226,8 +1228,11 @@ async function start() {
   window.addEventListener("focus", load);
   // A click outside an open date picker (and its row button) closes it, as in Things.
   // "click" (not "mousedown") so the clicked control, e.g. Save, acts first.
+  // A control the card has just redrawn (e.g. "+ Deadline", which opens the
+  // picker) is no longer on the page; that click isn't "outside".
   document.addEventListener("click", (event) => {
-    if (state.edit && state.edit.picker && !event.target.closest(".picker, .ed-date")) closePicker();
+    const outside = event.target.isConnected && !event.target.closest(".picker, .ed-date");
+    if (state.edit && state.edit.picker && outside) closePicker();
   });
 }
 
