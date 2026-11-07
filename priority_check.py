@@ -6,9 +6,13 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Tasks carry their project, position in it and
+  whether the project is sequential. `in_project_order` orders tasks of the
+  same project by the project's manual order; `next_in_sequence` hides tasks
+  of sequential projects that aren't next (unless due or completed).
 - v0.1.14 (2026-11-07): Deferring the start to a later date moves a deadline
   that is before that date to it (unless the edit sets the deadline).
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
@@ -41,7 +45,7 @@ Change log:
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 # Priority tags, highest first. Their order defines "highest priority wins".
 PRIORITIES = ("P1", "P2", "P3")
@@ -65,6 +69,11 @@ class Task:
     someday: bool = False  # In Someday (no start date). False with no date means Anytime.
     list_id: Optional[str] = None  # Project (directly or via its heading) or area id.
     heading_id: Optional[str] = None
+    project_id: Optional[str] = None  # Project (directly or via its heading); None if not in one.
+    # Position in the project's manual order: (0 = no heading / 1 = under a heading,
+    # heading position, position within the heading or the project).
+    project_rank: Tuple[int, int, int] = (0, 0, 0)
+    sequential: bool = False  # Its project is tagged as sequential.
 
     @property
     def completed(self) -> bool:
@@ -296,6 +305,41 @@ def today_counts(tasks: Iterable[Task], today: date) -> Dict[str, int]:
     open_tasks = [t for t in tasks if not t.completed]
     due = sum(1 for t in open_tasks if t.deadline is not None and t.deadline <= today)
     return {"due": due, "not_due": len(open_tasks) - due}
+
+
+def in_project_order(tasks: List[Task]) -> List[Task]:
+    """Reorder tasks of the same project by the project's manual order.
+
+    Each project's tasks keep the positions they had in the list, but fill
+    them in project order; tasks not in a project don't move.
+    """
+    result = list(tasks)
+    positions: Dict[str, List[int]] = {}
+    for i, task in enumerate(tasks):
+        if task.project_id is not None:
+            positions.setdefault(task.project_id, []).append(i)
+    for slots in positions.values():
+        ordered = sorted((tasks[i] for i in slots), key=lambda t: t.project_rank)
+        for slot, task in zip(slots, ordered):
+            result[slot] = task
+    return result
+
+
+def next_in_sequence(tasks: Iterable[Task], next_ids: Dict[str, str], today: date) -> List[Task]:
+    """Leave out tasks of sequential projects that aren't the project's next task.
+
+    `next_ids` maps each sequential project to its first open task (in project
+    order). A task due today or overdue is always kept, so no deadline is
+    hidden, and so are completed tasks (already done today).
+    """
+    def keep(task: Task) -> bool:
+        if not task.sequential or task.completed:
+            return True
+        if task.deadline is not None and task.deadline <= today:
+            return True
+        return next_ids.get(task.project_id) == task.uuid
+
+    return [t for t in tasks if keep(t)]
 
 
 def completed_last(tasks: List[Task]) -> List[Task]:

@@ -3,9 +3,12 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Tasks are read with their project, position in the
+  project and whether the project is tagged Sequential; read_next_tasks
+  finds each sequential project's next open task.
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): Synchronized module version metadata.
@@ -47,7 +50,7 @@ import subprocess
 import time
 import urllib.parse
 from datetime import date, datetime
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from priority_check import PRIORITIES, Change, Task
@@ -86,6 +89,9 @@ TASK_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 TYPE_TODO, TYPE_PROJECT, TYPE_HEADING = 0, 1, 2
 STATUS_OPEN, STATUS_COMPLETED = 0, 3
 START_INBOX, START_ANYTIME, START_SOMEDAY = 0, 1, 2
+
+# A project with this tag in Things is worked in order: only its next task shows in Today.
+SEQUENTIAL_TAG = "Sequential"
 
 # Lists Do Things shows itself: Today, then the custom searches.
 APP_LISTS = ("today", "p1", "p2", "p3", "overdue")
@@ -181,6 +187,9 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 _TASK_SELECT = f"""
 SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
+       COALESCE(t.project, h.project) AS project_id, h."index" AS heading_index, t."index" AS task_index,
+       EXISTS (SELECT 1 FROM TMTaskTag st JOIN TMTag sg ON sg.uuid = st.tags
+                WHERE st.tasks = COALESCE(t.project, h.project) AND sg.title = '{SEQUENTIAL_TAG}') AS sequential,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
@@ -224,7 +233,17 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         someday=row["start"] == START_SOMEDAY and row["startDate"] is None,
         list_id=row["list_id"],
         heading_id=row["heading_id"],
+        project_id=row["project_id"],
+        project_rank=_project_rank(row["heading_id"], row["heading_index"], row["task_index"]),
+        sequential=bool(row["sequential"]),
     )
+
+
+def _project_rank(heading_id: Optional[str], heading_index: Optional[int], task_index: Optional[int]) -> Tuple[int, int, int]:
+    """Position in the project's manual order: tasks without a heading first, then by heading."""
+    if heading_id is None:
+        return (0, 0, task_index or 0)
+    return (1, heading_index or 0, task_index or 0)
 
 
 def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, list, str]:
@@ -270,6 +289,32 @@ def read_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     """Return one to-do by id, or None if it does not exist."""
     row = conn.execute(f"{_TASK_SELECT} AND t.uuid = ?", [task_id]).fetchone()
     return _row_to_task(row) if row else None
+
+
+def read_next_tasks(conn: sqlite3.Connection, project_ids: Iterable[str]) -> Dict[str, str]:
+    """Return {project id: its first open to-do in the project's manual order}.
+
+    Covers the whole project, including to-dos not in Today, so "next" means
+    next in the project. To-dos under closed or trashed headings are skipped.
+    """
+    ids = sorted(set(project_ids))
+    if not ids:
+        return {}
+    placeholders = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT t.uuid, COALESCE(t.project, h.project) AS project_id, t.heading AS heading_id, "
+        "h.\"index\" AS heading_index, t.\"index\" AS task_index "
+        "FROM TMTask t LEFT JOIN TMTask h ON h.uuid = t.heading "
+        f"WHERE t.type = {TYPE_TODO} AND t.status = {STATUS_OPEN} AND t.trashed = 0 "
+        "AND t.rt1_recurrenceRule IS NULL "
+        f"AND COALESCE(h.trashed, 0) = 0 AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
+        f"AND COALESCE(t.project, h.project) IN ({placeholders})",
+        ids,
+    ).fetchall()
+    first: Dict[str, str] = {}
+    for row in sorted(rows, key=lambda r: _project_rank(r["heading_id"], r["heading_index"], r["task_index"])):
+        first.setdefault(row["project_id"], row["uuid"])
+    return first
 
 
 def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:

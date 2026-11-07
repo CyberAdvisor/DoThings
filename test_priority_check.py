@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Tests for in_project_order and next_in_sequence.
 - v0.1.14 (2026-11-07): Tests for deferral moving an earlier deadline.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): today_counts test uses `not_due`.
@@ -35,6 +36,8 @@ from priority_check import (
     current_priority,
     deadline_state,
     group_today,
+    in_project_order,
+    next_in_sequence,
     plan_completion,
     plan_edit,
     plan_move,
@@ -129,6 +132,56 @@ class StartDateRuleTests(unittest.TestCase):
         for name, task in cases.items():
             with self.subTest(name):
                 self.assertIsNone(plan_refresh(task, TODAY))
+
+
+def in_project(uuid: str, project: str, rank, sequential: bool = False, **kwargs) -> Task:
+    """Build a task in `project` at `rank` (see Task.project_rank)."""
+    task = make_task(uuid, **kwargs)
+    task.project_id, task.project_rank, task.sequential = project, rank, sequential
+    return task
+
+
+class ProjectOrderTests(unittest.TestCase):
+    """Tasks of the same project follow the project's manual order."""
+
+    def test_same_project_reordered_in_place(self) -> None:
+        tasks = [
+            in_project("p3", "P", (0, 0, 3)),
+            make_task("loose"),
+            in_project("p1", "P", (0, 0, 1)),
+            in_project("q1", "Q", (0, 0, 1)),
+            in_project("h1", "P", (1, 0, 0)),  # Under the first heading: after unheaded tasks.
+            in_project("p2", "P", (0, 0, 2)),
+        ]
+        self.assertEqual([t.uuid for t in in_project_order(tasks)], ["p1", "loose", "p2", "q1", "p3", "h1"])
+
+    def test_headings_in_heading_order(self) -> None:
+        tasks = [in_project("b", "P", (1, 2, 0)), in_project("a", "P", (1, 1, 5))]
+        self.assertEqual([t.uuid for t in in_project_order(tasks)], ["a", "b"])
+
+
+class SequenceTests(unittest.TestCase):
+    """Sequential projects show only their next task in Today."""
+
+    def test_only_next_task_shown(self) -> None:
+        tasks = [
+            in_project("first", "S", (0, 0, 1), True),
+            in_project("second", "S", (0, 0, 2), True),
+            in_project("plain", "P", (0, 0, 9)),
+            make_task("loose"),
+        ]
+        kept = next_in_sequence(tasks, {"S": "first"}, TODAY)
+        self.assertEqual([t.uuid for t in kept], ["first", "plain", "loose"])
+
+    def test_due_and_completed_tasks_always_shown(self) -> None:
+        tasks = [
+            in_project("due", "S", (0, 0, 2), True, deadline=TODAY),
+            in_project("overdue", "S", (0, 0, 3), True, deadline=YESTERDAY),
+            in_project("later", "S", (0, 0, 4), True, deadline=TOMORROW),
+            in_project("done", "S", (0, 0, 5), True, completed_at=1.0),
+        ]
+        kept = next_in_sequence(tasks, {"S": "elsewhere"}, TODAY)
+        self.assertEqual([t.uuid for t in kept], ["due", "overdue", "done"])
 
 
 class TodayCountsTests(unittest.TestCase):

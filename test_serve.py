@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Tests for sequential projects and project order in Today.
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): Counts test uses `not_due`.
@@ -146,6 +147,51 @@ class CountsTests(MockThingsTestCase):
         expected = {"inbox": 1, "today": {"due": 1, "not_due": 0}}
         self.assertEqual(serve.list_response("today")["counts"], expected)
         self.assertEqual(serve.list_response("overdue")["counts"], expected)
+
+
+class ProjectTests(MockThingsTestCase):
+    """Project order and sequential projects in Today."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3", "Sequential")
+        started = pack_things_date(TODAY)
+        with write_db(self.db_path) as conn:
+            conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") VALUES (?, ?, 1, 0, 0, 0)",
+                [("seq", "Sequential project"), ("plain", "Plain project")],
+            )
+            conn.execute("INSERT INTO TMTaskTag VALUES ('seq', 'Sequential')")
+            # todayIndex order is the reverse of project order.
+            rows = [("s1", "seq", 1, 9), ("s2", "seq", 2, 8), ("s3", "seq", 3, 7),
+                    ("p1", "plain", 1, 6), ("p2", "plain", 2, 5)]
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, project, "
+                f"\"index\", todayIndex) VALUES (?, ?, 0, 0, 0, 1, {started}, ?, ?, ?)",
+                [(u, u, p, i, ti) for u, p, i, ti in rows],
+            )
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, 'P2')", [(r[0],) for r in rows])
+
+    def p2_ids(self) -> list:
+        """Ids in Today's P2 group, in display order."""
+        return [t["id"] for t in serve.list_response("today")["groups"][1]["tasks"]]
+
+    def test_sequential_shows_next_and_plain_follows_project_order(self) -> None:
+        self.assertEqual(self.p2_ids(), ["p1", "p2", "s1"])
+        self.assertEqual(serve.list_response("today")["counts"]["today"], {"due": 0, "not_due": 3})
+
+    def test_due_task_later_in_sequence_shows(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 's3'", (pack_things_date(TODAY),))
+        groups = serve.list_response("today")["groups"]
+        self.assertEqual([t["id"] for t in groups[0]["tasks"]], ["s3"])  # Due today, so in Due Today.
+        self.assertEqual([t["id"] for t in groups[1]["tasks"]], ["p1", "p2", "s1"])
+
+    def test_next_task_advances_when_first_is_done(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET status = 3, stopDate = 0 WHERE uuid = 's1'")
+        self.assertEqual(self.p2_ids(), ["p1", "p2", "s2"])
 
 
 class CompletionTests(MockThingsTestCase):

@@ -8,9 +8,13 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Today shows only the next task of each sequential
+  project (due or overdue tasks always show), and tasks of the same project
+  follow the project's manual order within each priority group. The Today
+  counts match what Today shows.
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): Synchronized module version metadata.
@@ -73,6 +77,7 @@ from common import (
     read_checklist_progress,
     read_edit_options,
     read_list,
+    read_next_tasks,
     read_task,
     save_order,
     save_token,
@@ -87,6 +92,8 @@ from priority_check import (
     completed_last,
     deadline_state,
     group_today,
+    in_project_order,
+    next_in_sequence,
     plan_completion,
     plan_edit,
     plan_move,
@@ -173,6 +180,19 @@ def apply_refresh_rules(
     return False
 
 
+def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:
+    """Read Today as Do Things shows it.
+
+    Sequential projects show only their next task (due or overdue tasks
+    always show), and tasks of the same project follow the project's manual
+    order. The refresh rules still see every Today task (read_list).
+    """
+    tasks = read_list(conn, "today", today)
+    sequential_projects = {t.project_id for t in tasks if t.sequential}
+    tasks = next_in_sequence(tasks, read_next_tasks(conn, sequential_projects), today)
+    return in_project_order(tasks)
+
+
 def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
     """Build the JSON for Today or a search, applying the refresh rules first.
 
@@ -188,8 +208,8 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         missing = missing_priority_tags(conn)
     write_failed = apply_refresh_rules(db_path, token, today, missing)
     with open_things_db(db_path) as conn:
-        tasks = read_list(conn, name, today)
-        today_tasks = tasks if name == "today" else read_list(conn, "today", today)
+        today_tasks = read_today(conn, today)
+        tasks = today_tasks if name == "today" else read_list(conn, name, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
     if hide_completed:
         tasks = [t for t in tasks if not t.completed]

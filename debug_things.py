@@ -2,12 +2,15 @@
 
 Prints where the Things database is, whether the columns Do Things relies on
 exist, whether the P1-P3 tags exist, and every Today task with its tags,
-dates, completion, required priority and the change the refresh rules would make.
+dates, completion, project order, whether a sequential project hides it, required
+priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.14
+Version: 0.1.15
 
 Change log:
+- v0.1.15 (2026-11-07): Each task also shows its project position and, for
+  sequential projects, whether Today hides it (not next in the sequence).
 - v0.1.14 (2026-11-07): Synchronized module version metadata.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): Synchronized module version metadata.
@@ -35,9 +38,10 @@ from common import (
     missing_priority_tags,
     open_things_db,
     read_list,
+    read_next_tasks,
     today_local,
 )
-from priority_check import Change, plan_refresh, required_priority
+from priority_check import Change, next_in_sequence, plan_refresh, required_priority
 
 # Columns the queries in common.py depend on.
 REQUIRED_COLUMNS = {
@@ -96,14 +100,20 @@ def run() -> None:
         missing = missing_priority_tags(conn)
         print(f"Priority tags missing in Things: {', '.join(missing) if missing else 'none'}")
         tasks = read_list(conn, "today", today)
-    print(f"\nToday tasks: {len(tasks)}")
+        next_ids = read_next_tasks(conn, {t.project_id for t in tasks if t.sequential})
+    shown = {t.uuid for t in next_in_sequence(tasks, next_ids, today)}
+    print(f"\nToday tasks: {len(tasks)} ({len(tasks) - len(shown)} hidden by sequential projects)")
     for task in tasks:
+        sequence = ""
+        if task.sequential:
+            sequence = " sequential=" + ("shown" if task.uuid in shown else "hidden (not next)")
         change = plan_refresh(task, today)
         planned = describe_change(change) if change else "no change"
         print(
             f"- {task.title!r} [{task.uuid}]\n"
             f"    tags={task.tags} start={task.start_date} deadline={task.deadline} "
             f"context={task.context!r} completed={task.completed}\n"
+            f"    project_rank={task.project_rank}{sequence}\n"
             f"    required={required_priority(task, today)} planned={planned}"
         )
     print(f"\nDo Things v{PROJECT_VERSION} complete: diagnostic finished")
