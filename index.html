@@ -3,74 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.0.0
+  Version: 1.0.1
 
   Change log:
+  - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
   - v1.0.0 (2026-11-07): Sidebar title "Do Things" with the tagline "Getting
     Things Done in Things"; the version at the bottom links to the README.
-  - v0.1.29 (2026-11-07): Synchronized module version metadata.
-  - v0.1.28 (2026-11-07): A task a sequential project started shows its place
-    after the project name, e.g. "Seq Project · task 2 of 5".
-  - v0.1.27 (2026-11-07): The editor shows the server's preview of each date or
-    priority choice (/api/edit/preview) instead of applying the rules itself,
-    and Save puts the predicted row in place at once (or removes it if it
-    leaves the list). Red "Automatic updates are paused" bar with Retry. A
-    slow list refresh no longer draws over an editor opened meanwhile.
-  - v0.1.26 (2026-11-07): + Deadline and + When open the date picker again; the
-    click that opened it no longer counted as a click outside and closed it.
-  - v0.1.25 (2026-11-07): Editor note on priority changes describes the kept later deadline.
-  - v0.1.24 (2026-11-07): Synchronized module version metadata.
-  - v0.1.23 (2026-11-07): After saving an edit, the row shows a P tag only in
-    the Overdue search, matching the server.
-  - v0.1.22 (2026-11-07): After saving an edit in Today, the row shows no P tag
-    (Today's groups show the priority).
-  - v0.1.21 (2026-11-07): The notes icon is a page with a folded corner, as in Things.
-  - v0.1.20 (2026-11-07): Settings in the sidebar (replacing the token link):
-    replace the Things auth token, and choose Dark or Light appearance
-    (dark by default, remembered in this browser).
-  - v0.1.19 (2026-11-07): Rows look like Things: rounded-square checkboxes
-    (also Hide Completed), tags as outlined pills right after the title with
-    P tags included, gray icons after the title for repeating, notes and
-    checklist, a start-date badge before the title for later starts, and a
-    filled flag with Things' deadline wording (red when today or overdue).
-  - v0.1.18 (2026-11-07): Synchronized module version metadata.
-  - v0.1.17 (2026-11-07): Synchronized module version metadata.
-  - v0.1.16 (2026-11-07): Synchronized module version metadata.
-  - v0.1.15 (2026-11-07): Synchronized module version metadata.
-  - v0.1.14 (2026-11-07): Deferring When to a later date (Tomorrow or the
-    calendar) moves a deadline that is before it to that date, visibly.
-  - v0.1.13 (2026-11-07): Moves, reorders, check-offs and edit saves update
-    the page immediately and are confirmed with Things in the background, in
-    order (a failure redraws Things' real state with a message). Tomorrow
-    button on the editor's When line.
-  - v0.1.12 (2026-11-07): Today's gray count is the tasks that aren't due (as
-    in Things). The Hide Completed checkbox is the same round circle as the
-    task checkboxes.
-  - v0.1.11 (2026-11-07): "Hide Completed" checkbox under the searches hides
-    tasks checked off today in every view; remembered in this browser.
-  - v0.1.10 (2026-11-07): Sidebar counts as in Things: Inbox items, and for
-    Today a red badge of tasks due today or overdue plus the open total. The
-    editor shows checklist progress next to Open in Things.
-  - v0.1.9 (2026-11-07): Picking Someday or Anytime for When also removes the
-    deadline (the Deadline row disappears; it can be added back before saving).
-  - v0.1.8 (2026-11-07): When and Deadline open a date picker (calendar with
-    Today/Someday/Anytime or Clear) instead of a menu and date field. Copies
-    of repeating to-dos are no longer locked.
-  - v0.1.7 (2026-11-07): Clicking a task expands it into an inline editor
-    (title, notes, tags, When, deadline, project/area and heading, priority)
-    with Save and Cancel; empty fields are added with buttons. Open in Things
-    moved into the editor.
-  - v0.1.6 (2026-11-07): Checkbox on every task in Today and the searches.
-    Checking completes the task in Things, shows it dim gray and struck
-    through, and moves it to the bottom of its group; unchecking reopens it.
-  - v0.1.5 (2026-11-07): Inbox, Upcoming, Anytime, Someday and Logbook open in
-    Things (marked with an arrow). The missing-tags and token warnings, and the
-    failed-move message, now give step-by-step fixes.
-  - v0.1.4 (2026-11-07): Synchronized module version metadata.
-  - v0.1.3 (2026-11-07): Synchronized module version metadata.
-  - v0.1.2 (2026-11-07): Synchronized module version metadata.
-  - v0.1.1 (2026-11-07): Synchronized module version metadata.
-  - v0.1.0 (2026-11-07): Initial release.
 -->
 <html lang="en" data-theme="dark">
 <head>

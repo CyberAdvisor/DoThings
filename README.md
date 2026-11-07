@@ -1,37 +1,6 @@
 # Do Things
 
-## Change log
-- **v1.0.0 (2026-11-07):** Do Things uses your Mac's own time zone for "today" instead of Mountain Time, so it works wherever you are. The sidebar has a title, **Do Things**, with the tagline "Getting Things Done in Things", and the version at the bottom of the sidebar opens this guide. **Security fix:** if Do Things couldn't hand a change to Things (the `open` command failed or timed out), the line it wrote to `errors.log` included your Things auth token. It now records only what went wrong. If your `errors.log` contains lines starting "Could not open Things URL", delete the file; to be thorough, also replace the token in Things (Things › Settings › General › Manage) and save the new one in Do Things' Settings. The README is rewritten for people downloading Do Things: why it exists, a screenshot of Today, its advantages over Things, installing from a release, running it from a shortcut, cloning it to change it, and reporting problems.
-- **v0.1.29 (2026-11-07):** A task due today or overdue always shows in Do Things' Today, even if you removed it from Things' Today; the usual rule then gives it a start date of today, so it is back in Things' Today too. The sequential marker's first number is now the task's place in the project's order (completed tasks plus its position among the open ones), not just completed tasks plus one.
-- **v0.1.28 (2026-11-07):** A task started by a sequential project shows its place after the project name, for example "Seq Project · task 2 of 5" (completed tasks plus its position among the open ones in project order, of completed plus open tasks in the project). The marker goes once the task is completed or its date is changed.
-- **v0.1.27 (2026-11-07):** When you save an edit, the task shows its new deadline, start badge and group straight away, or leaves the list at once if it no longer belongs there (it stays dimmed until Things confirms). While editing, the dates and priority shown are worked out by Do Things' server, the same way the save will be. If Things doesn't apply an automatic update, Do Things pauses automatic updates and shows a red bar with the checks to make and a **Retry** button, instead of retrying and logging every minute. `errors.log` is capped at 1 MB (the previous one is kept as `errors.log.1`). The saved order forgets tasks that have left Today.
-- **v0.1.26 (2026-11-07):** Fixed: **+ Deadline** and **+ When** in the editor did nothing. The calendar opened and closed again on the same click.
-- **v0.1.25 (2026-11-07):** Moving a task into or out of P1 keeps a deadline that is after today. Moving into P1 sets the deadline to today only when there is none; moving out of P1 removes it only when it is today or overdue.
-- **v0.1.24 (2026-11-07):** The P1, P2 and P3 searches list only tasks that are in Today. A tagged task that starts later (for example, deferred to tomorrow) no longer shows in its search until its start date.
-- **v0.1.23 (2026-11-07):** The P1, P2 and P3 searches also hide the P tag on each row (the search name already says it). Only the Overdue search, which mixes priorities, shows it.
-- **v0.1.22 (2026-11-07):** In Today, task rows no longer show the P1, P2 or P3 tag, since the group they're in already shows the priority. The P1, P2, P3 and Overdue searches still show it.
-- **v0.1.21 (2026-11-07):** The notes icon on a task row is now a page with a folded corner, matching Things.
-- **v0.1.20 (2026-11-07):** New **Settings** at the bottom of the sidebar: replace the Things auth token, and choose **Dark** or **Light** appearance. Dark is the default (whatever your Mac is set to); the choice is remembered in your browser.
-- **v0.1.19 (2026-11-07):** Task rows look like Things: rounded-square checkboxes, tags (P tags included) as outlined pills right after the title, gray icons for repeating tasks, notes and checklists, a start-date badge ("Mon", "Nov 14") for tasks starting later, and a filled flag reading "1 day ago", "today" or "2 days left" (red when today or overdue).
-- **v0.1.18 (2026-11-07):** Fixed: unchecking a task in a sequential project didn't undo the next task Do Things had started, because Things moves a reopened task to the bottom of the project. Do Things now remembers which task's completion started the next one and undoes it whenever that task is opened again; the reopened task then counts as the one in progress, so nothing else is started.
-- **v0.1.17 (2026-11-07):** In a sequential project, if you uncheck a completed task after Do Things has started the next one, that next task goes back to undated (Anytime, without its P tag). Only tasks Do Things started itself are undone, and not if you've changed their date since. Do Things remembers them in `sequence_pulls.json`.
-- **v0.1.16 (2026-11-07):** Sequential projects now work forwards instead of hiding tasks: the project's first task with no start date and no deadline gets a start date of today and appears in Today; when it is checked off, the next one does. Tasks in the project that already have a start date or deadline follow their own dates. Someday tasks are skipped.
-- **v0.1.15 (2026-11-07):** Within each priority group, tasks from the same project follow the order you set in that project in Things. Projects tagged **Sequential** in Things show only their next open task in Today (top to bottom, across headings); a later task still shows if it is due today or overdue. Today's sidebar counts match what Today shows.
-- **v0.1.14 (2026-11-07):** Deferring a task's start to a later date (with **Tomorrow** or the calendar) also moves its deadline to that date if the deadline was earlier, so a deferred task leaves Today. A deadline you set in the same edit is kept.
-- **v0.1.13 (2026-11-07):** Moving, reordering, checking off and saving edits now show on the page immediately; Things confirms them in the background (the task is dimmed until it does). If Things doesn't apply a change, the list goes back to Things' real state and shows what to check. The editor's When line has a **Tomorrow** button that defers the start to tomorrow without changing the deadline.
-- **v0.1.12 (2026-11-07):** Today's gray count now shows only the tasks that aren't due, as in Things (the red badge counts the due ones). The Hide Completed checkbox is the same round circle as the task checkboxes.
-- **v0.1.11 (2026-11-07):** A **Hide Completed** checkbox under the searches hides tasks checked off today in every view; unchecking it shows them again. The setting is remembered in your browser.
-- **v0.1.10 (2026-11-07):** The sidebar shows counts like Things: the number of Inbox items, and for Today a red badge of tasks due today or overdue plus the total open. The editor shows a task's checklist progress (e.g. "Checklist: 1 of 3 done") next to Open in Things.
-- **v0.1.9 (2026-11-07):** A task with no start date (in the Inbox, Anytime or Someday) that is due today or overdue now gets a start date of today on the next refresh, so it is in Things' own Today too. In the editor, choosing Someday or Anytime for When also removes the deadline.
-- **v0.1.8 (2026-11-07):** When and Deadline open a date picker in the editor: a calendar plus Today, Someday and Anytime (When) or Today and Clear (Deadline). Copies of repeating to-dos are no longer locked; their When and deadline can be changed like any task.
-- **v0.1.7 (2026-11-07):** Click a task to edit it in place, like Things: title, notes, tags, When, deadline, project or area and heading, and priority, with Save and Cancel. Empty fields are added with the buttons at the bottom of the card. **Open in Things** is now in the card. Copies of repeating to-dos can't have their When or deadline changed from Do Things.
-- **v0.1.6 (2026-11-07):** Every task in Today and the P1, P2, P3 and Overdue searches has a checkbox. Checking it completes the task in Things and shows it dim gray and struck through at the bottom of its group until the end of the day; unchecking reopens it. Warning messages after a failed move or check now stay visible.
-- **v0.1.5 (2026-11-07):** Inbox, Upcoming, Anytime, Someday and Logbook now open in Things instead of in Do Things (marked with an arrow in the sidebar). While a P tag is missing in Things, Do Things changes no tags and explains step by step how to create them, instead of reporting a token problem. The token warning now lists what to check, in order. Browser disconnects no longer print errors in Terminal or `errors.log`.
-- **v0.1.4 (2026-11-07):** Pushing a new version to `main` now creates its `vX.Y.Z` tag and GitHub release automatically, with the commit message as the release notes. `.gitignore` now also ignores Python's `__pycache__/` folder.
-- **v0.1.3 (2026-11-07):** Added the missing `.gitignore`, so the auth token, the saved task order and the logs can't be committed by accident.
-- **v0.1.2 (2026-11-07):** To-dos inside a trashed project or heading no longer appear, and the Today, Inbox, Anytime, Upcoming, Someday, P1–P3 and Overdue lists no longer show to-dos whose project or heading is completed or canceled. Setup now covers giving Terminal Full Disk Access, which reading the Things database requires.
-- **v0.1.1 (2026-11-07):** Moving a task out of P1 that is in Today only because of its deadline now also sets its start date to today, so it stays in Today.
-- **v0.1.0 (2026-11-07):** First release. A Today view grouped into P1 Due Today, P2 To Do and P3 Follow Up, with automatic tagging, drag-and-drop between and within priorities, the Things sidebar lists, P1/P2/P3/Overdue searches, opening tasks in Things, and first-run auth-token setup.
+See [CHANGELOG.md](CHANGELOG.md) for what's new in each version.
 
 ## Why this exists
 Things 3 is good at capturing and organizing everything you might do. Do Things is for the other half of the job: doing it.
@@ -106,6 +75,7 @@ The commands in this guide assume that location. If you put it elsewhere, change
    - Open **System Settings › Privacy & Security › Full Disk Access** and turn on **Terminal**. If Terminal isn't listed, add it with **+**.
    - Quit and reopen Terminal. Turning on the toggle may ask for an administrator password.
    - Without this, macOS blocks reading the Things data without asking, and Do Things reports "Things database not found".
+4. **Shortcuts needs its own access.** Terminal's access doesn't cover the Do Things shortcut (section 7). Expect a separate macOS prompt the first time the shortcut runs.
 
 ## 4. First run and the auth token
 1. Open Terminal and start Do Things:
@@ -177,7 +147,9 @@ Do Things is a small server that runs while you use it. A shortcut starts it in 
    - **Pin in Menu Bar:** click **ⓘ** (Shortcut Details) at the top right and turn it on.
    - **Dock:** choose **File › Add to Dock**.
    - **Spotlight:** finds the shortcut by name.
-6. **Run it:** click **▶︎**. Your browser opens Do Things.
+6. **Run it:** click **▶︎**.
+7. **Allow access:** the first time, macOS asks whether Shortcuts may access data from other apps. Click **Allow**. Your browser opens Do Things.
+   - **If you missed or declined the prompt:** open **System Settings › Privacy & Security › Files & Folders**. Under **Shortcuts**, turn on **Data shared by Things and affiliated apps** and **Documents**. Then stop Do Things (see below) and run the shortcut again.
 
 Running the shortcut while Do Things is already running just opens the page again.
 
@@ -185,12 +157,13 @@ Running the shortcut while Do Things is already running just opens the page agai
 
 **Stop Do Things:** in Terminal, run `lsof -ti tcp:8765 | xargs kill`.
 
-**If the shortcut reports "Things database not found"** but Terminal works, also give **Shortcuts** Full Disk Access (section 3, step 3).
+**If Do Things shows "Things database not found"** after starting from the shortcut, Shortcuts doesn't have access yet. Turn on the two switches in step 7, then stop Do Things (above) and run the shortcut again. A server already running without access keeps failing until it is restarted.
 
 ## Files
 | File | Purpose |
 |---|---|
 | `README.md` | This guide |
+| `CHANGELOG.md` | What changed in each version, newest first |
 | `AGENTS.md` | Rules and checks for contributors and AI agents |
 | `CLAUDE_CONTEXT.md` | Primer for a fresh Claude conversation: data model, architecture, gotchas |
 | `LICENSE` | MIT license |
@@ -253,4 +226,4 @@ Open an issue at <https://github.com/CyberAdvisor/DoThings/issues/new>. Include:
 3. Ask Claude to:
    - confirm the design and file list before writing code;
    - run the verification commands in `AGENTS.md`;
-   - follow the release steps: version bump, change logs, then commit and push. The Release action creates the tag and release.
+   - follow the release steps: version bump, change logs (each file and `CHANGELOG.md`), then commit and push. The Release action creates the tag and release.

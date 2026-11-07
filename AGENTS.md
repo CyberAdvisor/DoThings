@@ -22,7 +22,7 @@ Guide for contributors and AI agents working on this repository.
 | `index.html` | Page: sidebar with counts, Hide Completed and Settings; Things-style rows; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar; Settings and token setup |
 | `screenshots/today.png` | README screenshot of Today, taken from the running app with sample data (deviation: the only non-root file besides the release workflow) |
 | `test_priority_check.py`, `test_common.py`, `test_serve.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things) |
-| `README.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
+| `README.md`, `CHANGELOG.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
 | `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
 
 ## Safety-critical behavior
@@ -41,6 +41,7 @@ Do not weaken any of these without explicit approval:
 
 ## Implementation conventions
 - Follow the project standard: snake_case files in the repo root, a docstring on every module, class and function, a `Version:` line and change log in every source file (an HTML comment in `index.html`), and type hints throughout.
+- Change log (deviation from the project standard, v1.0.1): user-visible changes go in `CHANGELOG.md`, newest first, not in a README `## Change log` section. Each file's header change log starts at v1.0.0; earlier history is in git.
 - Rules belong in `priority_check.py` and must stay free of I/O so they can be tested.
 - Database, file and command access belong in `common.py`. `serve.py` only wires requests to them.
 - All paths are `*_PATH` constants in `common.py` built from `BASE_DIR`.

@@ -3,49 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Midnight comes from start_of_day.
-- v0.1.29 (2026-11-07): Test the marker when the started task isn't first in
-  the project.
-- v0.1.28 (2026-11-07): Test that a started sequential task shows its place,
-  and loses it when its date changes.
-- v0.1.27 (2026-11-07): Tests for the edit preview, the refresh pause and
-  Retry, and pruning the saved order.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Synchronized module version metadata.
-- v0.1.24 (2026-11-07): Synchronized module version metadata.
-- v0.1.23 (2026-11-07): P tags are hidden in Today and the P searches,
-  shown only in Overdue.
-- v0.1.22 (2026-11-07): Test that Today's grouped rows leave out P tags and
-  the searches keep them.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Tests for Things-style row data: deadline wording,
-  start badge, all tags, notes/checklist/repeating flags.
-- v0.1.18 (2026-11-07): Sequence flow tests use Pull records with the
-  triggering task, including Things moving the reopened task to the bottom.
-- v0.1.17 (2026-11-07): The sequence record is kept in the test's temporary
-  folder; tests for undoing a started task when an earlier one is reopened.
-- v0.1.16 (2026-11-07): Sequential project tests now check that the next
-  undated task gets a start date of today, one at a time.
-- v0.1.15 (2026-11-07): Tests for sequential projects and project order in Today.
-- v0.1.14 (2026-11-07): Synchronized module version metadata.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): Counts test uses `not_due`.
-- v0.1.11 (2026-11-07): Test for hiding completed tasks.
-- v0.1.10 (2026-11-07): Tests for sidebar counts in list responses and
-  checklist progress in the task detail.
-- v0.1.9 (2026-11-07): Test that a refresh gives an undated task due today a
-  start date of today.
-- v0.1.8 (2026-11-07): Removed the repeating-copy refusal test (no longer
-  refused); the task detail returns today's date.
-- v0.1.7 (2026-11-07): Tests for loading a task for editing and saving edits,
-  including validation, missing tags, repeating copies and the saved order.
-- v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
-  completed tasks in list responses.
-- v0.1.5 (2026-11-07): Initial release.
 """
 
 import io

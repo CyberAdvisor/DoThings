@@ -3,50 +3,13 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Test that today and midnight follow the system time zone;
   midnight comes from start_of_day. Test that a failed `open` never logs the
   auth token.
-- v0.1.29 (2026-11-07): Test that a due task removed from Things' Today is
-  still listed.
-- v0.1.28 (2026-11-07): Test for count_completed.
-- v0.1.27 (2026-11-07): Test that errors.log is capped.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Synchronized module version metadata.
-- v0.1.24 (2026-11-07): P searches leave out tagged tasks that are not in Today.
-- v0.1.23 (2026-11-07): Synchronized module version metadata.
-- v0.1.22 (2026-11-07): Synchronized module version metadata.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Test for the repeating and checklist flags read
-  with each task.
-- v0.1.18 (2026-11-07): Pull records with `after`; read_last_completed.
-- v0.1.17 (2026-11-07): Tests for load_pulls/save_pulls.
-- v0.1.16 (2026-11-07): read_sequential_projects test replaces read_next_tasks.
-- v0.1.15 (2026-11-07): Tests for project position, the Sequential tag and
-  read_next_tasks.
-- v0.1.14 (2026-11-07): Synchronized module version metadata.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): Synchronized module version metadata.
-- v0.1.11 (2026-11-07): Synchronized module version metadata.
-- v0.1.10 (2026-11-07): Tests for count_inbox and read_checklist_progress.
-- v0.1.9 (2026-11-07): Synchronized module version metadata.
-- v0.1.8 (2026-11-07): Dropped the repeating-copy column and checks.
-- v0.1.7 (2026-11-07): Tests for the edit fields read from the database,
-  read_edit_options, and the new update URL parameters.
-- v0.1.6 (2026-11-07): Tests for tasks completed today appearing in the lists
-  (and earlier or canceled ones not), and for complete/reopen URLs.
-- v0.1.5 (2026-11-07): Dropped tests for the lists that now open in Things;
-  Things schema values not used by common.py are defined here; test for
-  opening a Things list by URL.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): Tests that to-dos under a trashed, completed or canceled
-  project or heading are left out of the lists.
-- v0.1.1 (2026-11-07): Test for the `when` parameter in update URLs.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 import contextlib

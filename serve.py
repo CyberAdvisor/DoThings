@@ -8,74 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Synchronized module version metadata.
-- v0.1.29 (2026-11-07): The sequential marker uses sequence_place (position in
-  project order, not completed + 1).
-- v0.1.28 (2026-11-07): Rows of tasks a sequential project started carry
-  `sequence` ("task 2 of 5"), in lists and the edit preview.
-- v0.1.27 (2026-11-07): POST /api/edit/preview shows an edit's result without
-  writing; an unconfirmed refresh write pauses automatic updates until Retry
-  (POST /api/refresh/retry) or a new token; the saved order forgets tasks no
-  longer in Today.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Synchronized module version metadata.
-- v0.1.24 (2026-11-07): Synchronized module version metadata.
-- v0.1.23 (2026-11-07): P tags are also left out in the P1-P3 searches (the
-  search names the priority); only Overdue shows them.
-- v0.1.22 (2026-11-07): Today's grouped rows leave out the P1-P3 tags (the
-  group shows the priority); the searches still show them.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Rows are sent the way Things shows them: all tags
-  (P tags included), Things-style deadline wording ("1 day ago", "today",
-  "2 days left"), a start-date badge for later starts, and whether the task
-  has notes, a checklist or repeats. The editor's tag list is `other_tags`.
-- v0.1.18 (2026-11-07): The sequence record keeps the task whose completion
-  led to each start; unchecking that task undoes the start wherever Things
-  has moved it, and the reopened task is then recorded as in progress so the
-  undone task isn't started again straight away.
-- v0.1.17 (2026-11-07): Records the task started in each sequential project
-  and, when an earlier task in the project is open again, returns it to
-  undated (Anytime, without its P tag).
-- v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Each
-  refresh first gives every sequential project's next undated task a start
-  date of today, then applies the Today rules (so it is also tagged P2).
-- v0.1.15 (2026-11-07): Today shows only the next task of each sequential
-  project (due or overdue tasks always show), and tasks of the same project
-  follow the project's manual order within each priority group. The Today
-  counts match what Today shows.
-- v0.1.14 (2026-11-07): Synchronized module version metadata.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): Synchronized module version metadata.
-- v0.1.11 (2026-11-07): /api/list takes `hide_completed=1` to leave out
-  tasks completed today (the sidebar counts are unaffected).
-- v0.1.10 (2026-11-07): List responses include sidebar counts (Inbox; Today
-  open and due/overdue). The task detail includes checklist progress.
-- v0.1.9 (2026-11-07): Synchronized module version metadata.
-- v0.1.8 (2026-11-07): Copies of repeating to-dos are no longer refused date
-  changes (tested: Things applies them). /api/task also returns today's date
-  for the date picker.
-- v0.1.7 (2026-11-07): New GET /api/task returns one task with the edit-view
-  choices; POST /api/edit validates an edit and sends it to Things as one
-  update (a priority change also updates the saved order). Moves and edits
-  that would change the dates of a copy of a repeating to-do are refused.
-- v0.1.6 (2026-11-07): New /api/complete completes or reopens a task (no P tags
-  needed). Lists include tasks completed today, sent with `completed` and
-  sorted after open tasks. Moving a completed task is refused.
-- v0.1.5 (2026-11-07): New /api/show-list opens Inbox, Upcoming, Anytime,
-  Someday or Logbook in Things; /api/list serves only Today and the searches.
-  While a P tag is missing in Things, refresh rules are skipped and a move to
-  that priority is refused with instructions, so a missing tag is no longer
-  reported as a token problem. A browser that disconnects before its reply is
-  ignored instead of being logged as a Things read error.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): Synchronized module version metadata.
-- v0.1.1 (2026-11-07): Synchronized module version metadata.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 import argparse

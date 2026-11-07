@@ -6,46 +6,11 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Today is labeled with the Mac's time zone.
-- v0.1.29 (2026-11-07): Synchronized module version metadata.
-- v0.1.28 (2026-11-07): Synchronized module version metadata.
-- v0.1.27 (2026-11-07): Synchronized module version metadata.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Synchronized module version metadata.
-- v0.1.24 (2026-11-07): Synchronized module version metadata.
-- v0.1.23 (2026-11-07): Synchronized module version metadata.
-- v0.1.22 (2026-11-07): Synchronized module version metadata.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Schema check requires `rt1_repeatingTemplate` again
-  (used for the repeating icon).
-- v0.1.18 (2026-11-07): Sequential projects also show Do Things' record (the
-  task it started and the one it followed), which decides what is in progress.
-- v0.1.17 (2026-11-07): Synchronized module version metadata.
-- v0.1.16 (2026-11-07): Lists each sequential project's task in progress and
-  whether the refresh would give it a start date of today (no more hiding).
-- v0.1.15 (2026-11-07): Each task also shows its project position and, for
-  sequential projects, whether Today hides it (not next in the sequence).
-- v0.1.14 (2026-11-07): Synchronized module version metadata.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): Synchronized module version metadata.
-- v0.1.11 (2026-11-07): Synchronized module version metadata.
-- v0.1.10 (2026-11-07): Schema check also requires TMChecklistItem (task, status).
-- v0.1.9 (2026-11-07): The planned change also shows a start date being set.
-- v0.1.8 (2026-11-07): Schema check no longer requires `rt1_repeatingTemplate`.
-- v0.1.7 (2026-11-07): Schema check also requires the `notes` and
-  `rt1_repeatingTemplate` columns used by the edit view.
-- v0.1.6 (2026-11-07): Today now includes tasks completed today; each is
-  printed with `completed=`.
-- v0.1.5 (2026-11-07): Synchronized module version metadata.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): Synchronized module version metadata.
-- v0.1.1 (2026-11-07): Synchronized module version metadata.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 import sqlite3

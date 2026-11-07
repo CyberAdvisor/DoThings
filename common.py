@@ -3,68 +3,14 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): today_local and start_of_day use the Mac's time zone instead of
   Mountain Time (LOCAL_TZ removed). Fixed: a failed or timed-out `open` logged
   the full command, including the auth token; describe_open_failure now logs
   only the kind of failure.
-- v0.1.29 (2026-11-07): Today (and the P searches) include due tasks the user
-  removed from Things' Today (deadlineSuppressionDate ignored); _TODAY_CLAUSE
-  replaces _today_clause and _has_column.
-- v0.1.28 (2026-11-07): count_completed (completed to-dos per project),
-  sharing its query with read_last_completed.
-- v0.1.27 (2026-11-07): errors.log is capped at 1 MB (RotatingFileHandler, one
-  older copy).
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Synchronized module version metadata.
-- v0.1.24 (2026-11-07): P1-P3 searches list only tasks in Today (Today's clause shared via _today_clause).
-- v0.1.23 (2026-11-07): Synchronized module version metadata.
-- v0.1.22 (2026-11-07): Synchronized module version metadata.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Tasks are read with whether they are a copy of a
-  repeating to-do and whether they have a checklist (for the row icons).
-- v0.1.18 (2026-11-07): The sequence record (Pull) also keeps `after`, the
-  task whose completion led to the start; read_last_completed finds it.
-- v0.1.17 (2026-11-07): load_pulls/save_pulls keep, per sequential project,
-  the task Do Things started and the date it gave it (sequence_pulls.json).
-  The order and pull files share _load_json_object/_save_json.
-- v0.1.16 (2026-11-07): read_sequential_projects returns the open to-dos of
-  each project tagged Sequential (replaces read_next_tasks); tasks no longer
-  carry a sequential flag.
-- v0.1.15 (2026-11-07): Tasks are read with their project, position in the
-  project and whether the project is tagged Sequential; read_next_tasks
-  finds each sequential project's next open task.
-- v0.1.14 (2026-11-07): Synchronized module version metadata.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): Synchronized module version metadata.
-- v0.1.11 (2026-11-07): Synchronized module version metadata.
-- v0.1.10 (2026-11-07): count_inbox for the sidebar; read_checklist_progress
-  for the editor's checklist indicator.
-- v0.1.9 (2026-11-07): Synchronized module version metadata.
-- v0.1.8 (2026-11-07): No longer reads whether a task is a copy of a
-  repeating to-do; nothing uses it now.
-- v0.1.7 (2026-11-07): Tasks are read with notes, Someday state, list and
-  heading, and whether they are copies of a repeating to-do. Update URLs can
-  set title, notes, When anytime/someday, list-id and
-  heading-id. read_edit_options lists tags, areas, projects and headings for
-  the edit view.
-- v0.1.6 (2026-11-07): Lists include tasks completed today (shown checked);
-  tasks carry their completion time. Update URLs can complete or reopen a task
-  and leave tags alone when a change has no tag list.
-- v0.1.5 (2026-11-07): Inbox, Upcoming, Anytime, Someday and Logbook now open in
-  Things, so their queries, LOGBOOK_LIMIT and the constants only they used are
-  removed. build_show_url opens either a task or one of those Things lists.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): To-dos inside a trashed project or heading are no longer
-  listed, and open lists also skip to-dos whose project or heading is completed
-  or canceled. Things leaves such to-dos marked open, so their own status is not
-  enough.
-- v0.1.1 (2026-11-07): Update URLs include `when` when a change sets the start date.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 import contextlib

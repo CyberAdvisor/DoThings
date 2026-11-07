@@ -1,45 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Synchronized module version metadata.
-- v0.1.29 (2026-11-07): Tests for sequence_place.
-- v0.1.28 (2026-11-07): Synchronized module version metadata.
-- v0.1.27 (2026-11-07): Tests for in_today, predict, place_in_list and
-  prune_order.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): Tests that a later deadline is kept on moves into and out of P1.
-- v0.1.24 (2026-11-07): Synchronized module version metadata.
-- v0.1.23 (2026-11-07): Synchronized module version metadata.
-- v0.1.22 (2026-11-07): Synchronized module version metadata.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Synchronized module version metadata.
-- v0.1.18 (2026-11-07): Undo tests use the task whose completion led to the
-  start, including after Things moved it to the bottom.
-- v0.1.17 (2026-11-07): Tests for find_pulled and plan_sequence_undo.
-- v0.1.16 (2026-11-07): Sequence tests now cover plan_sequence and
-  sequence_next instead of hiding.
-- v0.1.15 (2026-11-07): Tests for in_project_order and next_in_sequence.
-- v0.1.14 (2026-11-07): Tests for deferral moving an earlier deadline.
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): today_counts test uses `not_due`.
-- v0.1.11 (2026-11-07): Synchronized module version metadata.
-- v0.1.10 (2026-11-07): Test for today_counts.
-- v0.1.9 (2026-11-07): Tests for the start-date refresh rule and for Someday
-  and Anytime clearing the deadline.
-- v0.1.8 (2026-11-07): Removed the Change.changes_dates test with the property.
-- v0.1.7 (2026-11-07): Tests for plan_edit, the new Change fields and
-  Change.changes_dates.
-- v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
-  completed tasks sorting last and being skipped by the refresh rules.
-- v0.1.5 (2026-11-07): Synchronized module version metadata.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): Synchronized module version metadata.
-- v0.1.1 (2026-11-07): Tests for setting the start date when moving out of P1.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 import unittest

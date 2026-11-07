@@ -6,66 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 1.0.0
+Version: 1.0.1
 
 Change log:
+- v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Synchronized module version metadata.
-- v0.1.29 (2026-11-07): sequence_place: "task N of M" uses the task's position
-  in project order.
-- v0.1.28 (2026-11-07): Synchronized module version metadata.
-- v0.1.27 (2026-11-07): in_today, predict (an edit's result after the refresh
-  rules), place_in_list and prune_order.
-- v0.1.26 (2026-11-07): Synchronized module version metadata.
-- v0.1.25 (2026-11-07): plan_move keeps a deadline after today when moving into or out of P1; only a missing deadline is set (into P1) and only one of today or earlier is cleared (out of P1).
-- v0.1.24 (2026-11-07): Synchronized module version metadata.
-- v0.1.23 (2026-11-07): Synchronized module version metadata.
-- v0.1.22 (2026-11-07): Synchronized module version metadata.
-- v0.1.21 (2026-11-07): Synchronized module version metadata.
-- v0.1.20 (2026-11-07): Synchronized module version metadata.
-- v0.1.19 (2026-11-07): Tasks carry `repeating` (a copy of a repeating
-  to-do) and `has_checklist`, for the Things-style row icons.
-- v0.1.18 (2026-11-07): The undo is triggered by the task whose completion
-  led to the start being open again, not by project order (Things moves a
-  reopened task to the bottom of its project).
-- v0.1.17 (2026-11-07): `find_pulled` and `plan_sequence_undo`: a task Do
-  Things started in a sequential project goes back to undated when an
-  earlier task in the project is open again.
-- v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Instead
-  `plan_sequence` gives the project's next undated task a start date of
-  today (one at a time); dated tasks behave as normal. Removed
-  `next_in_sequence` and `Task.sequential`.
-- v0.1.15 (2026-11-07): Tasks carry their project, position in it and
-  whether the project is sequential. `in_project_order` orders tasks of the
-  same project by the project's manual order; `next_in_sequence` hides tasks
-  of sequential projects that aren't next (unless due or completed).
-- v0.1.14 (2026-11-07): Deferring the start to a later date moves a deadline
-  that is before that date to it (unless the edit sets the deadline).
-- v0.1.13 (2026-11-07): Synchronized module version metadata.
-- v0.1.12 (2026-11-07): today_counts returns `not_due` (open tasks that are
-  not due) instead of all open tasks, matching Things' sidebar.
-- v0.1.11 (2026-11-07): Synchronized module version metadata.
-- v0.1.10 (2026-11-07): `today_counts` gives the sidebar's Today counts.
-- v0.1.9 (2026-11-07): New refresh rule: a task with no start date (Inbox,
-  Anytime or Someday) due today or overdue gets a start date of today.
-  Choosing Someday or Anytime in an edit also clears the deadline, unless the
-  edit sets one.
-- v0.1.8 (2026-11-07): Removed `Task.repeating` and `Change.changes_dates`:
-  copies of repeating to-dos can have their dates changed by URL after all.
-- v0.1.7 (2026-11-07): Tasks carry notes, Someday state, list and heading.
-  `TaskEdit` and `plan_edit` turn an edit-view save into one Change (priority
-  uses the move rules; an explicit deadline or When wins). Change can also set
-  title, notes, When "anytime"/"someday", list and heading, and reports
-  `changes_dates`. Tasks flag copies of repeating to-dos (`repeating`).
-- v0.1.6 (2026-11-07): Tasks carry `completed_at`. `plan_completion` builds a
-  complete/reopen change; `Change.tags` may be None (tags left alone). The
-  refresh rules skip completed tasks, and completed tasks sort after open ones
-  (oldest completion first) in Today groups and in the searches.
-- v0.1.5 (2026-11-07): Synchronized module version metadata.
-- v0.1.4 (2026-11-07): Synchronized module version metadata.
-- v0.1.3 (2026-11-07): Synchronized module version metadata.
-- v0.1.2 (2026-11-07): Synchronized module version metadata.
-- v0.1.1 (2026-11-07): Moving a deadline-only Today task out of P1 also sets its start date to today.
-- v0.1.0 (2026-11-07): Initial release.
 """
 
 from dataclasses import dataclass, field, replace
