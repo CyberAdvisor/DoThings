@@ -6,9 +6,10 @@ tasks in Things, and stores the Things auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.1
+Version: 0.1.2
 
 Change log:
+- v0.1.2 (2026-11-07): Synchronized module version metadata.
 - v0.1.1 (2026-11-07): Synchronized module version metadata.
 - v0.1.0 (2026-11-07): Initial release.
 """

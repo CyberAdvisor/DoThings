@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.1
+Version: 0.1.2
 
 Change log:
+- v0.1.2 (2026-11-07): Tests that to-dos under a trashed, completed or canceled
+  project or heading are left out of the lists.
 - v0.1.1 (2026-11-07): Test for the `when` parameter in update URLs.
 - v0.1.0 (2026-11-07): Initial release.
 """
@@ -22,6 +24,7 @@ from common import (
     START_ANYTIME,
     START_INBOX,
     START_SOMEDAY,
+    STATUS_CANCELED,
     STATUS_COMPLETED,
     STATUS_OPEN,
     build_show_url,
@@ -186,9 +189,41 @@ class DatabaseTests(unittest.TestCase):
             "todayIndex, project, area, \"index\") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
             tasks,
         )
+        # Parents that hide their to-dos, and open to-dos inside them. Each child
+        # would be in Today and tagged P1 if only its own row were checked.
+        parents = [
+            # uuid, title, type, status, trashed, project
+            ("trashproj", "Trashed project", 1, STATUS_OPEN, 1, None),
+            ("doneproj", "Completed project", 1, STATUS_COMPLETED, 0, None),
+            ("cancelproj", "Canceled project", 1, STATUS_CANCELED, 0, None),
+            ("trashhead", "Trashed heading", 2, STATUS_OPEN, 1, "proj1"),
+            ("donehead", "Archived heading", 2, STATUS_COMPLETED, 0, "proj1"),
+            ("headintrash", "Heading in trashed project", 2, STATUS_OPEN, 0, "trashproj"),
+        ]
+        conn.executemany(
+            "INSERT INTO TMTask (uuid, title, type, status, trashed, project, start, \"index\") "
+            f"VALUES (?, ?, ?, ?, ?, ?, {START_ANYTIME}, 0)",
+            parents,
+        )
+        children = [
+            # uuid, status, project, heading
+            ("in_trashproj", STATUS_OPEN, "trashproj", None),
+            ("in_doneproj", STATUS_OPEN, "doneproj", None),
+            ("in_cancelproj", STATUS_OPEN, "cancelproj", None),
+            ("in_trashhead", STATUS_OPEN, None, "trashhead"),
+            ("in_donehead", STATUS_OPEN, None, "donehead"),
+            ("in_headintrash", STATUS_OPEN, None, "headintrash"),
+            ("done_in_trashproj", STATUS_COMPLETED, "trashproj", None),
+        ]
+        conn.executemany(
+            "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, todayIndex, "
+            f"project, heading, \"index\") VALUES (?, ?, 0, ?, 0, {START_ANYTIME}, {today}, 0, ?, ?, 0)",
+            [(uuid, uuid, status, project, heading) for uuid, status, project, heading in children],
+        )
         conn.executemany(
             "INSERT INTO TMTaskTag VALUES (?, ?)",
-            [("today1", "t1"), ("today1", "t3"), ("anytime", "t2")],
+            [("today1", "t1"), ("today1", "t3"), ("anytime", "t2")]
+            + [(uuid, "t1") for uuid, _, _, _ in children],
         )
         conn.commit()
         conn.close()
@@ -214,6 +249,17 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(self._ids("p1"), ["today1"])
         self.assertEqual(self._ids("p2"), ["anytime"])
         self.assertEqual(self._ids("overdue"), ["overdue"])
+
+    def test_todos_under_closed_or_trashed_parents_hidden(self) -> None:
+        # Today, P1, Anytime and Logbook are checked against the expected lists
+        # in the tests above; this names the hidden to-dos explicitly.
+        hidden = {
+            "in_trashproj", "in_doneproj", "in_cancelproj",
+            "in_trashhead", "in_donehead", "in_headintrash", "done_in_trashproj",
+        }
+        for name in ("today", "anytime", "p1", "logbook"):
+            with self.subTest(name=name):
+                self.assertFalse(hidden & set(self._ids(name)))
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:

@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.2 (2026-11-07):** To-dos inside a trashed project or heading no longer appear, and the Today, Inbox, Anytime, Upcoming, Someday, P1–P3 and Overdue lists no longer show to-dos whose project or heading is completed or canceled. Setup now covers giving Terminal Full Disk Access, which reading the Things database requires.
 - **v0.1.1 (2026-11-07):** Moving a task out of P1 that is in Today only because of its deadline now also sets its start date to today, so it stays in Today.
 - **v0.1.0 (2026-11-07):** First release. A Today view grouped into P1 Due Today, P2 To Do and P3 Follow Up, with automatic tagging, drag-and-drop between and within priorities, the Things sidebar lists, P1/P2/P3/Overdue searches, opening tasks in Things, and first-run auth-token setup.
 
@@ -46,7 +47,7 @@ git clone https://github.com/CyberAdvisor/DoThings.git ~/Documents/Projects/DoTh
 
 To change the token later, click **Things auth token…** at the bottom of the sidebar. If Things ever fails to confirm a change, Do Things shows a warning with a button to re-enter the token.
 
-The first time Do Things reads Things' data, macOS may ask whether Python (or Terminal) may access data from other apps. Allow it. This is a per-user permission and needs no admin rights.
+Before the first run, give Terminal **Full Disk Access**: **System Settings › Privacy & Security › Full Disk Access**, turn on **Terminal** (add it with **+** if it isn't listed), then quit and reopen Terminal. Without it, macOS blocks reading the Things database without asking: `debug_things.py` reports "Things database not found", and `ls` on the Things folder shows "Operation not permitted". Turning on the toggle may ask for an administrator password.
 
 ## 5. Test manually before automating
 ```

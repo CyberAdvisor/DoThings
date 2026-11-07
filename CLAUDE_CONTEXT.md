@@ -29,12 +29,14 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - `task_order.json`: `{"P1": [ids], "P2": [ids], "P3": [ids]}`. Ids not listed appear after the listed ones, in Things' `todayIndex` order. `update_order` removes moved ids from other groups so an id is never listed twice.
 
 ## Things database facts
+- Reading it needs Full Disk Access for Terminal. Without it, macOS silently blocks access ("Operation not permitted") and the database is reported as not found.
 - Location: `~/Library/Group Containers/JLMPQHK86H.com.culturedcode.ThingsMac/ThingsData-*/Things Database.thingsdatabase/main.sqlite`. Older versions have no `ThingsData-*` folder. Both layouts are searched, and the newest file wins.
 - `TMTask`:
   - `type` 0 = to-do.
   - `status` 0 open, 2 canceled, 3 completed.
   - `start` 0 Inbox, 1 Anytime, 2 Someday.
   - `trashed`.
+  - A to-do keeps `status` 0 and `trashed` 0 when its project or heading is trashed, completed or canceled, so queries also check the project (`project`), heading (`heading`) and heading's project. Trashed parents hide to-dos from every list; closed parents hide them from open lists.
   - `startDate` and `deadline` are packed ints (`year<<16 | month<<12 | day<<7`).
   - `todayIndex` gives the Today order.
   - `rt1_recurrenceRule` is non-null on repeating templates, which are excluded.

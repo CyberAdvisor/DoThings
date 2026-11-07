@@ -3,9 +3,13 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.1
+Version: 0.1.2
 
 Change log:
+- v0.1.2 (2026-11-07): To-dos inside a trashed project or heading are no longer
+  listed, and open lists also skip to-dos whose project or heading is completed
+  or canceled. Things leaves such to-dos marked open, so their own status is not
+  enough.
 - v0.1.1 (2026-11-07): Update URLs include `when` when a change sets the start date.
 - v0.1.0 (2026-11-07): Initial release.
 """
@@ -165,7 +169,18 @@ LEFT JOIN TMTask hp ON hp.uuid = h.project
 LEFT JOIN TMArea a ON a.uuid = t.area
 LEFT JOIN TMArea ha ON ha.uuid = p.area
 WHERE t.type = {TYPE_TODO} AND t.trashed = 0 AND t.rt1_recurrenceRule IS NULL
+  AND COALESCE(p.trashed, 0) = 0 AND COALESCE(h.trashed, 0) = 0 AND COALESCE(hp.trashed, 0) = 0
 """
+
+# A to-do keeps its own status and trashed flag when its project or heading is
+# trashed, completed or canceled, so the parents are checked too: trashed in
+# _TASK_SELECT (every list) and status here (open lists only). A to-do with no
+# project or heading counts as having an open, untrashed parent.
+_OPEN_ONLY = (
+    f"t.status = {STATUS_OPEN} AND COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} "
+    f"AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
+    f"AND COALESCE(hp.status, {STATUS_OPEN}) = {STATUS_OPEN}"
+)
 
 
 def _row_to_task(row: sqlite3.Row) -> Task:
@@ -186,7 +201,6 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
 
     `today` is today's date in Things' packed format.
     """
-    open_only = f"t.status = {STATUS_OPEN}"
     if name == "today":
         # Today = started tasks dated today or earlier, plus tasks due today or overdue.
         deadline_clause = "(t.deadline IS NOT NULL AND t.deadline <= ?"
@@ -194,19 +208,19 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
             deadline_clause += " AND t.deadlineSuppressionDate IS NULL"
         deadline_clause += ")"
         where = (
-            f"{open_only} AND ((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
+            f"{_OPEN_ONLY} AND ((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
             f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
         )
         return where, [today, today], "t.todayIndex, t.\"index\""
     if name == "inbox":
-        return f"{open_only} AND t.start = {START_INBOX}", [], "t.\"index\""
+        return f"{_OPEN_ONLY} AND t.start = {START_INBOX}", [], "t.\"index\""
     if name == "anytime":
-        return f"{open_only} AND t.start = {START_ANYTIME}", [], "t.\"index\""
+        return f"{_OPEN_ONLY} AND t.start = {START_ANYTIME}", [], "t.\"index\""
     if name == "upcoming":
-        where = f"{open_only} AND t.start = {START_SOMEDAY} AND t.startDate > ?"
+        where = f"{_OPEN_ONLY} AND t.start = {START_SOMEDAY} AND t.startDate > ?"
         return where, [today], "t.startDate, t.todayIndex"
     if name == "someday":
-        where = f"{open_only} AND t.start = {START_SOMEDAY} AND t.startDate IS NULL"
+        where = f"{_OPEN_ONLY} AND t.start = {START_SOMEDAY} AND t.startDate IS NULL"
         return where, [], "t.\"index\""
     if name == "logbook":
         where = f"t.status IN ({STATUS_CANCELED}, {STATUS_COMPLETED})"
@@ -214,12 +228,12 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
         return where, [], f"t.stopDate DESC LIMIT {LOGBOOK_LIMIT}"
     if name in ("p1", "p2", "p3"):
         where = (
-            f"{open_only} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
+            f"{_OPEN_ONLY} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
             "ON tg.uuid = tt.tags WHERE tt.tasks = t.uuid AND tg.title = ?)"
         )
         return where, [name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
     if name == "overdue":
-        where = f"{open_only} AND t.deadline IS NOT NULL AND t.deadline < ?"
+        where = f"{_OPEN_ONLY} AND t.deadline IS NOT NULL AND t.deadline < ?"
         return where, [today], "t.deadline, t.\"index\""
     raise ValueError(f"Unknown list: {name!r}")
 
