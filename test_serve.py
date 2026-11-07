@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.19
+Version: 0.1.20
 
 Change log:
+- v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Tests for Things-style row data: deadline wording,
   start badge, all tags, notes/checklist/repeating flags.
 - v0.1.18 (2026-11-07): Sequence flow tests use Pull records with the

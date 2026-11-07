@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.19
+Version: 0.1.20
 
 Change log:
+- v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Schema check requires `rt1_repeatingTemplate` again
   (used for the repeating icon).
 - v0.1.18 (2026-11-07): Sequential projects also show Do Things' record (the

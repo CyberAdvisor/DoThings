@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.19
+Version: 0.1.20
 
 Change log:
+- v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Tasks carry `repeating` (a copy of a repeating
   to-do) and `has_checklist`, for the Things-style row icons.
 - v0.1.18 (2026-11-07): The undo is triggered by the task whose completion

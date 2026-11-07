@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.20 (2026-11-07):** New **Settings** at the bottom of the sidebar: replace the Things auth token, and choose **Dark** or **Light** appearance. Dark is the default (whatever your Mac is set to); the choice is remembered in your browser.
 - **v0.1.19 (2026-11-07):** Task rows look like Things: rounded-square checkboxes, tags (P tags included) as outlined pills right after the title, gray icons for repeating tasks, notes and checklists, a start-date badge ("Mon", "Nov 14") for tasks starting later, and a filled flag reading "1 day ago", "today" or "2 days left" (red when today or overdue).
 - **v0.1.18 (2026-11-07):** Fixed: unchecking a task in a sequential project didn't undo the next task Do Things had started, because Things moves a reopened task to the bottom of the project. Do Things now remembers which task's completion started the next one and undoes it whenever that task is opened again; the reopened task then counts as the one in progress, so nothing else is started.
 - **v0.1.17 (2026-11-07):** In a sequential project, if you uncheck a completed task after Do Things has started the next one, that next task goes back to undated (Anytime, without its P tag). Only tasks Do Things started itself are undone, and not if you've changed their date since. Do Things remembers them in `sequence_pulls.json`.
@@ -66,7 +67,7 @@ git clone https://github.com/CyberAdvisor/DoThings.git ~/Documents/Projects/DoTh
 2. The first time, it shows a setup screen. In Things, choose **Things › Settings › General**, turn on **Enable Things URLs**, click **Manage**, and copy the authorization token.
 3. Paste it into the setup screen and click **Save**. It is stored in `auth_token.txt`, readable only by your account and never committed to git.
 
-To change the token later, click **Things auth token…** at the bottom of the sidebar. If Things ever fails to confirm a change, Do Things shows a warning with a button to re-enter the token.
+To change the token later, open **Settings** at the bottom of the sidebar and click **Replace token…**. Settings also switches the appearance between **Dark** (the default) and **Light**. If Things ever fails to confirm a change, Do Things shows a warning with a button to re-enter the token.
 
 Before the first run, give Terminal **Full Disk Access**: **System Settings › Privacy & Security › Full Disk Access**, turn on **Terminal** (add it with **+** if it isn't listed), then quit and reopen Terminal. Without it, macOS blocks reading the Things database without asking: `debug_things.py` reports "Things database not found", and `ls` on the Things folder shows "Operation not permitted". Turning on the toggle may ask for an administrator password.
 
