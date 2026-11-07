@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.20
+Version: 0.1.21
 
 Change log:
+- v0.1.21 (2026-11-07): Synchronized module version metadata.
 - v0.1.20 (2026-11-07): Synchronized module version metadata.
 - v0.1.19 (2026-11-07): Rows are sent the way Things shows them: all tags
   (P tags included), Things-style deadline wording ("1 day ago", "today",

@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.21 (2026-11-07):** The notes icon on a task row is now a page with a folded corner, matching Things.
 - **v0.1.20 (2026-11-07):** New **Settings** at the bottom of the sidebar: replace the Things auth token, and choose **Dark** or **Light** appearance. Dark is the default (whatever your Mac is set to); the choice is remembered in your browser.
 - **v0.1.19 (2026-11-07):** Task rows look like Things: rounded-square checkboxes, tags (P tags included) as outlined pills right after the title, gray icons for repeating tasks, notes and checklists, a start-date badge ("Mon", "Nov 14") for tasks starting later, and a filled flag reading "1 day ago", "today" or "2 days left" (red when today or overdue).
 - **v0.1.18 (2026-11-07):** Fixed: unchecking a task in a sequential project didn't undo the next task Do Things had started, because Things moves a reopened task to the bottom of the project. Do Things now remembers which task's completion started the next one and undoes it whenever that task is opened again; the reopened task then counts as the one in progress, so nothing else is started.
