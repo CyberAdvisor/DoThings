@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): Tests for in_today, predict, place_in_list and
+  prune_order.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Tests that a later deadline is kept on moves into and out of P1.
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
@@ -51,12 +53,16 @@ from priority_check import (
     find_pulled,
     group_today,
     in_project_order,
+    in_today,
+    place_in_list,
     plan_completion,
     plan_edit,
     plan_move,
     plan_refresh,
     plan_sequence,
     plan_sequence_undo,
+    predict,
+    prune_order,
     required_priority,
     sequence_next,
     today_counts,
@@ -516,6 +522,49 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(deadline_state(TODAY, TODAY), "today")
         self.assertEqual(deadline_state(TOMORROW, TODAY), "future")
         self.assertIsNone(deadline_state(None, TODAY))
+
+
+
+class PredictTests(unittest.TestCase):
+    """Predicting a task after an edit and the next refresh, and where it is listed."""
+
+    def test_in_today(self) -> None:
+        self.assertTrue(in_today(make_task(start_date=TODAY), TODAY))
+        self.assertTrue(in_today(make_task(deadline=YESTERDAY), TODAY))
+        self.assertFalse(in_today(make_task(start_date=TOMORROW, deadline=TOMORROW), TODAY))
+        self.assertFalse(in_today(make_task(), TODAY))
+
+    def test_predict_applies_change_then_refresh(self) -> None:
+        task = make_task(tags=["P2", "Home"], start_date=TODAY)
+        after = predict(task, Change("A1", None, set_deadline=TODAY), TODAY)
+        self.assertEqual((after.deadline, sorted(after.tags)), (TODAY, ["Home", "P1"]))
+        self.assertEqual(task.deadline, None)  # The original is unchanged.
+
+    def test_predict_no_refresh_outside_today(self) -> None:
+        task = make_task(tags=["P1"], start_date=TODAY, deadline=TODAY)
+        after = predict(task, Change("A1", None, set_when="someday", clear_deadline=True), TODAY)
+        self.assertEqual((after.start_date, after.deadline, after.someday, after.tags), (None, None, True, ["P1"]))
+
+    def test_predict_undated_due_today_gets_start(self) -> None:
+        after = predict(make_task(tags=["P2"]), Change("A1", None, set_deadline=TODAY), TODAY)
+        self.assertEqual((after.start_date, after.tags), (TODAY, ["P1"]))
+
+    def test_place_in_list(self) -> None:
+        p2 = make_task(tags=["P2"], start_date=TODAY)
+        self.assertEqual(place_in_list(p2, "today", TODAY), "P2")
+        self.assertEqual(place_in_list(p2, "p2", TODAY), "list")
+        self.assertIsNone(place_in_list(p2, "p1", TODAY))
+        self.assertIsNone(place_in_list(p2, "overdue", TODAY))
+        later = make_task(tags=["P1"], start_date=TOMORROW)
+        self.assertIsNone(place_in_list(later, "today", TODAY))
+        self.assertIsNone(place_in_list(later, "p1", TODAY))
+        self.assertEqual(place_in_list(make_task(tags=["P1"], deadline=YESTERDAY), "overdue", TODAY), "list")
+        with self.assertRaises(ValueError):
+            place_in_list(p2, "inbox", TODAY)
+
+    def test_prune_order(self) -> None:
+        order = {"P1": ["a", "gone"], "P3": ["b"]}
+        self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"]})
 
 
 if __name__ == "__main__":

@@ -14,7 +14,7 @@ On every list refresh (page load, window focus, every 60 seconds), each Today ta
 
 Refresh changes never touch deadlines.
 
-Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edit`), unless the same edit sets one. Deferring the start to a date after today moves a deadline that is before that date to it (so the task leaves Today), unless the same edit sets or clears the deadline; the page applies the same rule in `setStartDate`. The page mirrors this so the Deadline row disappears before saving.
+Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edit`), unless the same edit sets one. Deferring the start to a date after today moves a deadline that is before that date to it (so the task leaves Today), unless the same edit sets or clears the deadline; The page doesn't apply these rules: each date or priority choice asks `POST /api/edit/preview`, which runs `plan_edit` and `predict` (the change, then the refresh rules if the task is in Today) and returns the resulting When, deadline and priority, the row (`task_to_json`) and its place in the list being shown (`place_in_list`: a Today group, "list" in a search, or null). Save fetches a final preview and puts that row in place before the write is confirmed (v0.1.27). A deadline chosen in the card is sent with a When change even if unchanged, so the defer rule doesn't move it.
 
 Manual moves:
 - All P tags are replaced with the destination tag.
@@ -30,7 +30,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 ## Data model
 - `Task`: uuid, title, tags, start_date, deadline, context (project or area title).
 - `Change`: task_id, the full `tags` list, `set_deadline` or `clear_deadline`, and optionally `set_start_date`. `is_satisfied_by(task)` is how a write is confirmed.
-- `task_order.json`: `{"P1": [ids], "P2": [ids], "P3": [ids]}`. Ids not listed appear after the listed ones, in Things' `todayIndex` order. `update_order` removes moved ids from other groups so an id is never listed twice.
+- `task_order.json`: `{"P1": [ids], "P2": [ids], "P3": [ids]}`. Every list request drops ids no longer in Today (`prune_order`) and saves only if something was dropped. Ids not listed appear after the listed ones, in Things' `todayIndex` order. `update_order` removes moved ids from other groups so an id is never listed twice.
 
 ## Things database facts
 - Reading it needs Full Disk Access for Terminal. Without it, macOS silently blocks access ("Operation not permitted") and the database is reported as not found.
@@ -71,7 +71,9 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 
 ## Architecture notes
 - A browser that disconnects mid-request raises `ConnectionError` while the reply is sent. `Handler.handle` ignores it, and `_run` sends the reply outside its `try` so it isn't logged as a Things read error.
-- The page updates optimistically: drags, reorders, check-offs and edit saves change the DOM first, then `enqueue` sends the request. Requests run one at a time in order (`saveQueue`); rows are dimmed (`.saving`) and not draggable until confirmed, opening the editor waits for pending changes, and the list isn't refreshed until the queue is empty. Then `load()` redraws from Things, which undoes anything Things didn't apply.
+- The page updates optimistically: drags, reorders, check-offs and edit saves change the DOM first, then `enqueue` sends the request. Requests run one at a time in order (`saveQueue`); rows are dimmed (`.saving`) and not draggable until confirmed, opening the editor waits for pending changes, and the list isn't refreshed until the queue is empty. Then `load()` redraws from Things, which undoes anything Things didn't apply. `load()` checks again after its request returns and doesn't draw over an editor, drag or change started meanwhile (a refresh can take seconds when it writes).
+- Refresh pause (v0.1.27): when `apply_refresh_rules` reports an unconfirmed write, `RefreshPause.paused` is set and later refreshes skip the rules; the list response's `refresh_paused` drives the red bar. Cleared by `POST /api/refresh/retry`, a new token, or a server restart. Manual writes are always tried.
+- `errors.log` uses a `RotatingFileHandler` (1 MB, one backup).
 - `HTTPServer` is single-threaded on purpose, so writes to Things and to the order file never overlap.
 - Starting `serve.py` when port 8765 is already in use just opens the page and exits. The Shortcut relies on this.
 - Request checks: the Host header must be `127.0.0.1:8765` or `localhost:8765`, and POSTs need `X-Do-Things: 1`.

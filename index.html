@@ -3,9 +3,14 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.26
+  Version: 0.1.27
 
   Change log:
+  - v0.1.27 (2026-11-07): The editor shows the server's preview of each date or
+    priority choice (/api/edit/preview) instead of applying the rules itself,
+    and Save puts the predicted row in place at once (or removes it if it
+    leaves the list). Red "Automatic updates are paused" bar with Retry. A
+    slow list refresh no longer draws over an editor opened meanwhile.
   - v0.1.26 (2026-11-07): + Deadline and + When open the date picker again; the
     click that opened it no longer counted as a click outside and closed it.
   - v0.1.25 (2026-11-07): Editor note on priority changes describes the kept later deadline.
@@ -74,11 +79,13 @@
     --bg: #ffffff; --sidebar: #f4f4f6; --text: #1d1d1f; --muted: #8a8a8e;
     --line: #e6e6e9; --hover: #eef0f4; --selected: #dfe3ea; --accent: #2f6fe4;
     --red: #e5484d; --pill: #eceef1; --banner: #fff4e5; --banner-text: #8a4b00;
+    --error: #fdecec; --error-text: #b42318;
   }
   :root[data-theme="dark"] {
     --bg: #1e1f22; --sidebar: #26272b; --text: #ececee; --muted: #8e8e93;
     --line: #34353a; --hover: #2e3035; --selected: #3a3d44; --accent: #5b8cff;
     --red: #ff6369; --pill: #34363b; --banner: #3a2e1c; --banner-text: #ffc879;
+    --error: #3b1f21; --error-text: #ff9592;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -138,6 +145,7 @@
     background: var(--banner); color: var(--banner-text); border-radius: 8px;
     padding: 10px 14px; margin-bottom: 16px;
   }
+  .banner.error { background: var(--error); color: var(--error-text); }
   .banner button { margin-left: 8px; }
   .banner ol { margin: 6px 0 0; padding-left: 20px; }
   .banner p { margin: 0; }
@@ -531,13 +539,27 @@ function renderBanners(content, data) {
         "Come back to this page. It checks again automatically.",
       ]));
   }
-  if (data.write_failed) {
-    const banner = stepsBanner("Things didn't apply a change from Do Things. Check:", WRITE_FAILED_STEPS);
+  if (data.refresh_paused) {
+    const banner = stepsBanner(
+      "Automatic updates are paused: Things didn't apply a change from Do Things. Check:", WRITE_FAILED_STEPS);
+    banner.classList.add("error");
+    const retry = el("button", "", "Retry");
+    retry.onclick = retryRefresh;
     const fix = el("button", "secondary", "Update token");
     fix.onclick = () => showSetup(false);
-    banner.append(fix);
+    banner.append(retry, fix);
     content.append(banner);
   }
+}
+
+/** Resume automatic updates after the checks above, and reload (which tries them once). */
+async function retryRefresh() {
+  try {
+    await api("/api/refresh/retry", {});
+  } catch (error) {
+    setStatus(error.message);
+  }
+  load();
 }
 
 /** Draw a list: priority groups for Today, a flat list otherwise. */
@@ -695,6 +717,9 @@ async function startEdit(row, id) {
       task, options, today, card: row,
       picker: null,       // "when" or "deadline" while that date picker is open.
       pickerMonth: null,  // First day of the month the picker shows (YYYY-MM-01).
+      preview: null,      // The server's preview of the edit (see refreshPreview); null until a date or priority changes.
+      previewSeq: 0,      // Numbers preview requests, so only the newest answer is shown.
+      touched: { when: false, deadline: false }, // Dates chosen here (not just loaded).
       draft: {
         title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
         priority: task.priority, tags: [...task.other_tags], list_id: task.list_id, heading_id: task.heading_id,
@@ -793,16 +818,17 @@ function buildEditor() {
     card.append(editorRow("Tags", ...chips, add));
   }
 
+  const dates = editorDates();
   if (shown.when) {
-    const label = { today: "★ Today", someday: "Someday", anytime: "Anytime" }[draft.when.kind]
-      || "📅 " + dateLabel(draft.when.date);
+    const label = { today: "★ Today", someday: "Someday", anytime: "Anytime" }[dates.when.kind]
+      || "📅 " + dateLabel(dates.when.date);
     const tomorrow = addDays(state.edit.today, 1);
     const parts = [dateButton(label, "when", false)];
-    if (draft.when.date !== tomorrow) {
-      // Defer to tomorrow in one click; the deadline is left as it is.
+    if (dates.when.date !== tomorrow) {
+      // Defer to tomorrow in one click.
       const defer = el("button", "secondary ed-tomorrow", "Tomorrow");
       defer.type = "button";
-      defer.onclick = () => { setStartDate(tomorrow); state.edit.picker = null; redrawEditor(); };
+      defer.onclick = () => pickDate("when", tomorrow);
       parts.push(defer);
     }
     card.append(editorRow("When", ...parts));
@@ -810,12 +836,12 @@ function buildEditor() {
   }
 
   if (shown.deadline) {
-    const overdue = draft.deadline && draft.deadline < state.edit.today;
-    const button = dateButton(draft.deadline ? "⚑ " + dateLabel(draft.deadline) : "⚑ Pick a date", "deadline", overdue);
+    const overdue = dates.deadline && dates.deadline < state.edit.today;
+    const button = dateButton(dates.deadline ? "⚑ " + dateLabel(dates.deadline) : "⚑ Pick a date", "deadline", overdue);
     const clear = el("button", "ed-x", "✕");
     clear.type = "button";
     clear.title = "Remove deadline";
-    clear.onclick = () => { draft.deadline = ""; shown.deadline = false; state.edit.picker = null; redrawEditor(); };
+    clear.onclick = () => { shown.deadline = false; pickDate("deadline", ""); };
     card.append(editorRow("Deadline", button, clear));
     if (state.edit.picker === "deadline") card.append(buildPicker("deadline"));
   }
@@ -854,13 +880,14 @@ function buildEditor() {
     const button = el("button", p === draft.priority ? "on" : "", p);
     button.type = "button";
     button.disabled = locked;
-    button.onclick = () => { draft.priority = p; redrawEditor(); };
+    button.onclick = () => { draft.priority = p; refreshPreview(); };
     seg.append(button);
   }
   card.append(editorRow("Priority", seg));
-  if (draft.priority !== task.priority) {
-    card.append(el("div", "note",
-      "Moving into P1 sets a missing deadline to today; moving out of P1 removes a deadline of today or earlier. A later deadline is kept, and a deadline you set here wins."));
+  const preview = state.edit.preview;
+  if (preview && preview.priority !== draft.priority) {
+    // Only a deadline of today or earlier overrides the chosen priority.
+    card.append(el("div", "note", `Due today or overdue, so it will be ${preview.priority}.`));
   }
   if (locked) {
     card.append(el("div", "note", "Completed. Uncheck it to edit."));
@@ -928,17 +955,19 @@ function dateButton(label, which, overdue) {
 
 /** Open the picker for "when" or "deadline", showing the month of its current date. */
 function openPicker(which) {
-  const { draft, today } = state.edit;
-  const current = which === "when" ? draft.when.date : draft.deadline;
+  const { today } = state.edit;
+  const dates = editorDates();
+  const current = which === "when" ? dates.when.date : dates.deadline;
   state.edit.picker = which;
   state.edit.pickerMonth = (current || today).slice(0, 8) + "01";
 }
 
 /** Close the picker. A row opened with + and left without a date is hidden again. */
 function closePicker() {
-  const { draft, shown, task } = state.edit;
-  if (state.edit.picker === "deadline" && !draft.deadline) shown.deadline = false;
-  if (state.edit.picker === "when" && draft.when.kind === "anytime" && task.when.kind === "anytime") {
+  const { shown, task } = state.edit;
+  const dates = editorDates();
+  if (state.edit.picker === "deadline" && !dates.deadline) shown.deadline = false;
+  if (state.edit.picker === "when" && dates.when.kind === "anytime" && task.when.kind === "anytime") {
     shown.when = false;
   }
   state.edit.picker = null;
@@ -946,32 +975,53 @@ function closePicker() {
 }
 
 /**
- * Set the chosen date (or keyword for When) and close the picker. Someday and
- * Anytime also remove the deadline, matching the server's plan_edit rule.
+ * Record a date chosen for When (a date, "someday" or "anytime") or the
+ * deadline (a date, or "" to remove it), close the picker and show the
+ * server's preview. The rules that follow from it (e.g. deferring moves an
+ * earlier deadline) are the server's: the preview shows their result.
  */
 function pickDate(which, value) {
-  const { draft, shown } = state.edit;
-  if (which === "deadline") {
-    draft.deadline = value;
-  } else if (value === "someday" || value === "anytime") {
-    draft.when = { kind: value, date: null };
-    draft.deadline = "";
-    shown.deadline = false;
-  } else {
-    setStartDate(value);
-  }
+  const { draft, touched, today } = state.edit;
+  touched[which] = true;
+  if (which === "deadline") draft.deadline = value;
+  else if (value === "someday" || value === "anytime") draft.when = { kind: value, date: null };
+  else draft.when = { kind: value === today ? "today" : "date", date: value };
   state.edit.picker = null;
-  redrawEditor();
+  refreshPreview();
+}
+
+/** The When and deadline to show: the server's preview of the edit, or the task as loaded. */
+function editorDates() {
+  const { task, preview } = state.edit;
+  const source = preview || task;
+  return { when: source.when, deadline: source.deadline || "" };
+}
+
+/** Ask the server what saving `changes` would do (see preview_edit in serve.py). */
+function requestPreview(changes) {
+  return api("/api/edit/preview", { id: state.edit.task.id, list: state.list, changes });
 }
 
 /**
- * Set the draft's start date. Deferring to a date after today also moves a
- * deadline that is before that date to it, matching the server's plan_edit rule.
+ * Redraw the editor, then show the server's preview of the edit: the When,
+ * deadline and priority the save would end up with. Only the newest answer
+ * is shown, and none once the editor has closed.
  */
-function setStartDate(iso) {
-  const { draft, today } = state.edit;
-  draft.when = { kind: iso === today ? "today" : "date", date: iso };
-  if (iso > today && draft.deadline && draft.deadline < iso) draft.deadline = iso;
+async function refreshPreview() {
+  const edit = state.edit;
+  const seq = ++edit.previewSeq;
+  redrawEditor();
+  try {
+    const preview = await requestPreview(editorChanges().changes);
+    if (state.edit !== edit || seq !== edit.previewSeq) return;
+    edit.preview = preview;
+    if (preview.deadline) edit.shown.deadline = true;
+    else if (edit.picker !== "deadline") edit.shown.deadline = false;
+    if (preview.when.kind !== "anytime") edit.shown.when = true;
+    redrawEditor();
+  } catch (error) {
+    if (state.edit === edit) editorMessage(error.message);
+  }
 }
 
 /** Return the YYYY-MM-DD date `days` after `iso`. */
@@ -988,8 +1038,9 @@ function pad2(n) {
 
 /** Build the date picker: quick choices, a month header and a calendar grid. */
 function buildPicker(which) {
-  const { draft, today, pickerMonth } = state.edit;
-  const chosen = which === "deadline" ? draft.deadline : draft.when.date;
+  const { today, pickerMonth } = state.edit;
+  const dates = editorDates();
+  const chosen = which === "deadline" ? dates.deadline : dates.when.date;
   const picker = el("div", "picker");
   const quick = el("div", "quick");
   const choices = which === "when"
@@ -998,14 +1049,7 @@ function buildPicker(which) {
   for (const [label, value] of choices) {
     const button = el("button", "", label);
     button.type = "button";
-    button.onclick = () => {
-      if (which === "deadline" && value === "") {
-        draft.deadline = "";
-        closePicker();
-      } else {
-        pickDate(which, value);
-      }
-    };
+    button.onclick = () => pickDate(which, value);
     quick.append(button);
   }
   picker.append(quick);
@@ -1043,38 +1087,77 @@ function buildPicker(which) {
   return picker;
 }
 
-/** Compare the draft with the task as loaded; return {changes} or {error}. */
+/**
+ * Compare the draft with the task as loaded; return {changes, error}. With an
+ * empty title, `error` is set and the title is left out of `changes` (the
+ * preview still works).
+ */
 function editorChanges() {
-  const { task, draft } = state.edit;
+  const { task, draft, touched } = state.edit;
   const changes = {};
-  if (!draft.title.trim()) return { error: "The title can't be empty." };
-  if (draft.title.trim() !== task.title) changes.title = draft.title.trim();
+  const error = draft.title.trim() ? null : "The title can't be empty.";
+  if (!error && draft.title.trim() !== task.title) changes.title = draft.title.trim();
   if (draft.notes !== task.notes) changes.notes = draft.notes;
   const when = draft.when;
   if (when.kind !== task.when.kind || (when.kind === "date" && when.date !== task.when.date)) {
     changes.when = when.kind === "date" ? when.date : when.kind;
   }
-  if (draft.deadline !== (task.deadline || "")) changes.deadline = draft.deadline;
+  // A deadline chosen here is sent with a When change even if it is the old
+  // one, so the server's defer rule doesn't move it.
+  if (draft.deadline !== (task.deadline || "") || (touched.deadline && changes.when !== undefined)) {
+    changes.deadline = draft.deadline;
+  }
   if (draft.priority !== task.priority) changes.priority = draft.priority;
   if ([...draft.tags].sort().join("\u001f") !== [...task.other_tags].sort().join("\u001f")) changes.tags = draft.tags;
   if (draft.list_id && draft.list_id !== task.list_id) changes.list_id = draft.list_id;
   if (draft.heading_id && draft.heading_id !== task.heading_id) changes.heading_id = draft.heading_id;
-  return { changes };
+  return { changes, error };
 }
 
-/** Send the edits to Things; close the editor once Things confirms them. */
-function saveEditor() {
+/**
+ * Save the edits: the editor closes at once, showing the task as the server
+ * predicts it (placeRow), dimmed until Things confirms the change.
+ */
+async function saveEditor() {
   const { changes, error } = editorChanges();
   if (error) { editorMessage(error); return; }
   if (!Object.keys(changes).length) { closeEditor(); return; }
-  const { task, draft, card } = state.edit;
-  // Close the card straight away, showing the task as edited.
-  // Only the Overdue search shows P tags; elsewhere the list shows the priority (as the server sends it).
-  const tags = state.list === "overdue" ? [...draft.tags, draft.priority] : draft.tags;
-  const row = taskRow({ ...task, title: draft.title.trim(), tags }, null);
-  card.replaceWith(row);
-  state.edit = null;
-  enqueue(row, "the changes", () => api("/api/edit", { id: task.id, changes }));
+  if (state.busy) return; // A save is already being prepared (e.g. Enter pressed twice).
+  state.busy = true;
+  const { task, card } = state.edit;
+  try {
+    const preview = await requestPreview(changes);
+    state.edit = null;
+    const row = placeRow(card, preview);
+    enqueue(row, "the changes", () => api("/api/edit", { id: task.id, changes }));
+  } catch (failure) {
+    editorMessage(failure.message);
+  } finally {
+    state.busy = false;
+  }
+}
+
+/**
+ * Replace the editor card with the task's predicted row, where it will appear:
+ * in place, at the end of its new priority group (before completed tasks), or
+ * nowhere if it leaves this list. Returns the row, or null if it was removed.
+ */
+function placeRow(card, preview) {
+  if (!preview.place) {
+    card.remove();
+    return null;
+  }
+  const group = state.list === "today" ? preview.place : null;
+  const row = taskRow(preview.row, group);
+  const zone = group && document.querySelector(`.drop-zone[data-priority="${group}"]`);
+  if (zone && card.parentNode !== zone) {
+    card.remove();
+    zone.querySelectorAll(".empty").forEach((e) => e.remove());
+    zone.insertBefore(row, zone.querySelector(".task.done"));
+  } else {
+    card.replaceWith(row);
+  }
+  return row;
 }
 
 /** Close the editor without saving and redraw the list. */
@@ -1200,11 +1283,16 @@ function showSetup(firstRun, returnTo = "list") {
 
 /** Fetch and show the current list. Skipped while saving, dragging, editing or in setup. */
 async function load() {
-  if (state.busy || state.pending || state.drag || state.edit || state.view !== "list") return;
+  const blocked = () => state.busy || state.pending || state.drag || state.edit || state.view !== "list";
+  if (blocked()) return;
   renderSidebar();
   try {
+    const list = state.list;
     const hide = state.hideCompleted ? "&hide_completed=1" : "";
-    const data = await api(`/api/list?name=${encodeURIComponent(state.list)}${hide}`);
+    const data = await api(`/api/list?name=${encodeURIComponent(list)}${hide}`);
+    // A refresh can take seconds (it may write to Things). Don't draw over an
+    // editor, drag or change started meanwhile, or a list chosen since.
+    if (blocked() || state.list !== list) return;
     if (!data.token_set) { showSetup(true); return; }
     state.counts = data.counts;
     renderSidebar(); // Again, now with the fresh counts.

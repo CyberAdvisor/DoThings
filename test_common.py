@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): Test that errors.log is capped.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): P searches leave out tagged tasks that are not in Today.
@@ -43,6 +44,7 @@ Change log:
 """
 
 import contextlib
+import logging.handlers
 import os
 import sqlite3
 import stat
@@ -53,6 +55,7 @@ from datetime import date, datetime, timedelta
 from typing import Iterator
 
 from common import (
+    LOG_MAX_BYTES,
     LOCAL_TZ,
     Pull,
     START_ANYTIME,
@@ -64,6 +67,7 @@ from common import (
     build_show_url,
     build_update_url,
     count_inbox,
+    get_logger,
     is_valid_task_id,
     load_order,
     load_pulls,
@@ -109,6 +113,15 @@ CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTaskTag (tasks TEXT, tags TEXT);
 CREATE TABLE TMChecklistItem (uuid TEXT PRIMARY KEY, title TEXT, status INTEGER, task TEXT, "index" INTEGER);
 """
+
+
+class LoggerTests(unittest.TestCase):
+    """errors.log is size-capped."""
+
+    def test_log_is_capped_with_one_older_copy(self) -> None:
+        handler = get_logger().handlers[0]
+        self.assertIsInstance(handler, logging.handlers.RotatingFileHandler)
+        self.assertEqual((handler.maxBytes, handler.backupCount), (LOG_MAX_BYTES, 1))
 
 
 class TokenTests(unittest.TestCase):

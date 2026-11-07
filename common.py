@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): errors.log is capped at 1 MB (RotatingFileHandler, one
+  older copy).
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): P1-P3 searches list only tasks in Today (Today's clause shared via _today_clause).
@@ -60,6 +62,7 @@ import contextlib
 import glob
 import json
 import logging
+import logging.handlers
 import os
 import re
 import sqlite3
@@ -75,6 +78,7 @@ from priority_check import PRIORITIES, Change, Task
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
 ERRORS_LOG_PATH = os.path.join(BASE_DIR, "errors.log")
+LOG_MAX_BYTES = 1024 * 1024  # errors.log size cap (one older copy is kept).
 INDEX_HTML_PATH = os.path.join(BASE_DIR, "index.html")
 ORDER_PATH = os.path.join(BASE_DIR, "task_order.json")
 TOKEN_PATH = os.path.join(BASE_DIR, "auth_token.txt")
@@ -130,10 +134,16 @@ PROJECT_VERSION = load_project_version()
 
 
 def get_logger() -> logging.Logger:
-    """Return the shared logger, which writes warnings and errors to errors.log."""
+    """Return the shared logger, which writes warnings and errors to errors.log.
+
+    The log is capped: past LOG_MAX_BYTES it moves to errors.log.1 (replacing
+    the previous one) and a new errors.log starts.
+    """
     logger = logging.getLogger("dothings")
     if not logger.handlers:
-        handler = logging.FileHandler(ERRORS_LOG_PATH, encoding="utf-8")
+        handler = logging.handlers.RotatingFileHandler(
+            ERRORS_LOG_PATH, maxBytes=LOG_MAX_BYTES, backupCount=1, encoding="utf-8"
+        )
         handler.setFormatter(
             logging.Formatter(
                 f"%(asctime)s version={PROJECT_VERSION} %(levelname)s %(message)s"

@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): Tests for the edit preview, the refresh pause and
+  Retry, and pruning the saved order.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
@@ -90,6 +92,7 @@ class MockThingsTestCase(unittest.TestCase):
             mock.patch.object(serve, "today_local", return_value=TODAY),
             mock.patch.object(serve, "load_order", return_value={}),
             mock.patch.object(serve, "save_order"),
+            mock.patch.object(serve.RefreshPause, "paused", False),
             # Keep the sequence record in the temporary folder, never the project's.
             mock.patch.object(serve, "load_pulls", lambda: load_pulls(self.pulls_path)),
             mock.patch.object(serve, "save_pulls", lambda pulls: save_pulls(pulls, self.pulls_path)),
@@ -115,7 +118,7 @@ class MissingTagTests(MockThingsTestCase):
     def test_refresh_skipped_while_tags_missing(self) -> None:
         response = serve.list_response("today")
         self.assertEqual(response["missing_tags"], ["P2", "P3"])
-        self.assertFalse(response["write_failed"])
+        self.assertFalse(response["refresh_paused"])
         self.apply_change.assert_not_called()
 
     def test_refresh_runs_once_tags_exist(self) -> None:
@@ -135,6 +138,50 @@ class MissingTagTests(MockThingsTestCase):
     def test_move_to_existing_tag_allowed(self) -> None:
         self.assertEqual(serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]}), {"ok": True})
         self.apply_change.assert_called_once()
+
+
+class RefreshPauseTests(MockThingsTestCase):
+    """An unconfirmed refresh write pauses automatic updates until Retry."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3")
+        self.apply_change.return_value = False
+
+    def test_failure_pauses_and_retry_resumes(self) -> None:
+        self.assertTrue(serve.list_response("today")["refresh_paused"])
+        self.assertEqual(self.apply_change.call_count, 1)
+        self.assertTrue(serve.list_response("today")["refresh_paused"])
+        self.assertEqual(self.apply_change.call_count, 1)  # Not tried again while paused.
+        serve.retry_refresh({})
+        self.apply_change.return_value = True
+        self.assertFalse(serve.list_response("today")["refresh_paused"])
+        self.assertEqual(self.apply_change.call_count, 2)
+
+    def test_new_token_resumes(self) -> None:
+        serve.list_response("today")
+        with mock.patch.object(serve, "save_token"):
+            serve.set_token({"token": "new"})
+        self.assertFalse(serve.RefreshPause.paused)
+
+    def test_manual_changes_still_tried_while_paused(self) -> None:
+        serve.list_response("today")
+        self.assertEqual(serve.complete_task({"id": "task1", "completed": True}), {"ok": False, "write_failed": True})
+        self.assertEqual(self.apply_change.call_count, 2)
+
+
+class OrderPruneTests(MockThingsTestCase):
+    """The saved order forgets tasks no longer in Today."""
+
+    def test_gone_ids_dropped(self) -> None:
+        with mock.patch.object(serve, "load_order", return_value={"P2": ["gone", "task1"]}):
+            serve.list_response("p1")
+        serve.save_order.assert_called_once_with({"P1": [], "P2": ["task1"], "P3": []})
+
+    def test_nothing_saved_when_all_present(self) -> None:
+        with mock.patch.object(serve, "load_order", return_value={"P2": ["task1"]}):
+            serve.list_response("today")
+        serve.save_order.assert_not_called()
 
 
 class StartDateRefreshTests(MockThingsTestCase):
@@ -467,6 +514,45 @@ class EditTests(MockThingsTestCase):
         self.assertIn("Create the P3 tag", raised.exception.message)
         self.edit(title="Fine without tags")  # No tags sent, so allowed.
         self.apply_change.assert_called_once()
+
+    def preview(self, list_name: str = "today", **changes: object) -> dict:
+        """Preview `changes` to task1 as seen from `list_name`."""
+        return serve.preview_edit({"id": "task1", "list": list_name, "changes": changes})
+
+    def test_preview_unchanged_matches_list_row(self) -> None:
+        preview = self.preview()
+        self.assertEqual(preview["place"], "P2")
+        self.assertEqual(preview["row"], serve.list_response("today")["groups"][1]["tasks"][0])
+        self.assertEqual((preview["priority"], preview["deadline"]), ("P2", None))
+
+    def test_preview_defer_moves_deadline_and_leaves_today(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'", (pack_things_date(TODAY),))
+        tomorrow = (TODAY + timedelta(days=1)).isoformat()
+        preview = self.preview(when=tomorrow)
+        self.assertEqual(preview["deadline"], tomorrow)
+        self.assertEqual(preview["when"], {"kind": "date", "date": tomorrow})
+        self.assertIsNone(preview["place"])
+        self.assertIsNotNone(preview["row"]["start_label"])
+
+    def test_preview_deadline_today_becomes_p1(self) -> None:
+        preview = self.preview(deadline=TODAY.isoformat())
+        self.assertEqual((preview["priority"], preview["place"]), ("P1", "P1"))
+        self.assertIsNone(self.preview("p2", deadline=TODAY.isoformat())["place"])
+        self.assertEqual(self.preview("p2")["place"], "list")
+
+    def test_preview_someday_clears_deadline_and_list_change_sets_context(self) -> None:
+        preview = self.preview(when="someday", list_id="proj1")
+        self.assertEqual((preview["when"]["kind"], preview["deadline"]), ("someday", None))
+        self.assertIsNone(preview["place"])
+        self.assertEqual(preview["row"]["context"], "Project")
+
+    def test_preview_writes_nothing_and_needs_no_token(self) -> None:
+        with mock.patch.object(serve, "load_token", return_value=None):
+            self.preview(priority="P1")
+        self.apply_change.assert_not_called()
+        with self.assertRaises(serve.ApiError):
+            self.preview("inbox")
 
     def test_unconfirmed_edit_reported(self) -> None:
         self.apply_change.return_value = False

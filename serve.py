@@ -8,9 +8,13 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): POST /api/edit/preview shows an edit's result without
+  writing; an unconfirmed refresh write pauses automatic updates until Retry
+  (POST /api/refresh/retry) or a new token; the saved order forgets tasks no
+  longer in Today.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
@@ -75,6 +79,7 @@ import json
 import sqlite3
 import urllib.parse
 import webbrowser
+from dataclasses import replace
 from datetime import date
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -114,6 +119,7 @@ from priority_check import (
     PRIORITIES,
     PRIORITY_LABELS,
     WHEN_KEYWORDS,
+    Change,
     Task,
     TaskEdit,
     completed_last,
@@ -127,6 +133,9 @@ from priority_check import (
     plan_refresh,
     plan_sequence,
     plan_sequence_undo,
+    place_in_list,
+    predict,
+    prune_order,
     required_priority,
     today_counts,
     update_order,
@@ -145,6 +154,17 @@ MAX_NOTES_CHARS = 20000
 PRIORITY_TAG_LISTS = ("overdue",)
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
+
+
+class RefreshPause:
+    """Whether automatic refresh writes are paused.
+
+    Set when a refresh write isn't confirmed, so a broken setup (URLs off,
+    wrong token) isn't retried and logged every 60 seconds. Cleared by Retry
+    on the page, a new token, or restarting the server.
+    """
+
+    paused = False
 
 
 class ApiError(Exception):
@@ -311,22 +331,28 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
     today = today_local()
     with open_things_db(db_path) as conn:
         missing = missing_priority_tags(conn)
-    write_failed = apply_refresh_rules(db_path, token, today, missing)
+    if not RefreshPause.paused and apply_refresh_rules(db_path, token, today, missing):
+        RefreshPause.paused = True
+        get_logger().error("Automatic updates paused until Retry: Things didn't confirm a change.")
     with open_things_db(db_path) as conn:
         today_tasks = read_today(conn, today)
         tasks = today_tasks if name == "today" else read_list(conn, name, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
+    order = load_order()
+    kept = prune_order(order, [t.uuid for t in today_tasks])  # Forget tasks that left Today.
+    if kept != {p: order.get(p, []) for p in PRIORITIES}:
+        save_order(kept)
     if hide_completed:
         tasks = [t for t in tasks if not t.completed]
     response: Dict[str, Any] = {
         "name": name,
         "token_set": token is not None,
-        "write_failed": write_failed,
+        "refresh_paused": RefreshPause.paused,
         "missing_tags": missing,
         "counts": counts,
     }
     if name == "today":
-        groups = group_today(tasks, load_order(), today)
+        groups = group_today(tasks, kept, today)
         response["groups"] = [
             {
                 "priority": p,
@@ -356,20 +382,29 @@ def parse_order(body: Dict[str, Any]) -> Tuple[str, List[str]]:
 def load_task_for_write(task_id: object) -> Tuple[Task, str, str, List[str]]:
     """Check a write request and return (task, token, db_path, missing P tags).
 
-    Raises an ApiError for a bad id, a missing token or an unknown task.
+    Raises an ApiError for a missing token, a bad id or an unknown task.
     """
-    if not is_valid_task_id(task_id):
-        raise ApiError(400, "Invalid task id.")
     token = load_token()
     if token is None:
         raise ApiError(409, "The Things auth token is not set.")
+    task, db_path, missing = load_task(task_id)
+    return task, token, db_path, missing
+
+
+def load_task(task_id: object) -> Tuple[Task, str, List[str]]:
+    """Return (task, db_path, missing P tags) for a request naming a task.
+
+    Raises an ApiError for a bad id or an unknown task.
+    """
+    if not is_valid_task_id(task_id):
+        raise ApiError(400, "Invalid task id.")
     db_path = require_db_path()
     with open_things_db(db_path) as conn:
         task = read_task(conn, task_id)
         missing = missing_priority_tags(conn)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
-    return task, token, db_path, missing
+    return task, db_path, missing
 
 
 def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -506,15 +541,50 @@ def parse_edit(changes: object, task: Task, options: Dict[str, list], today: dat
     return edit
 
 
+def plan_edit_request(
+    body: Dict[str, Any], task: Task, db_path: str, today: date
+) -> Tuple[Optional[Change], Dict[str, list]]:
+    """Validate an edit request for `task` and return (the planned change, the edit options)."""
+    if task.completed:
+        raise ApiError(409, "Uncheck the task before editing it.")
+    with open_things_db(db_path) as conn:
+        options = read_edit_options(conn)
+    return plan_edit(task, parse_edit(body.get("changes"), task, options, today), today), options
+
+
+def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Show what an edit would do, without writing anything.
+
+    Returns the When, deadline and priority the save would end up with (after
+    the edit and refresh rules), the task's row as it will look, and where it
+    will appear in the list `list` the page is showing ("P1"-"P3" in Today,
+    "list" in a search, None if it leaves the list). The page shows these
+    instead of working out the rules itself.
+    """
+    name = body.get("list")
+    if name not in APP_LISTS:
+        raise ApiError(400, "Unknown list.")
+    task, db_path, _ = load_task(body.get("id"))
+    today = today_local()
+    change, options = plan_edit_request(body, task, db_path, today)
+    after = task if change is None else predict(task, change, today)
+    if change is not None and change.set_list_id is not None:
+        titles = {item["id"]: item["title"] for item in options["areas"] + options["projects"]}
+        after = replace(after, context=titles[change.set_list_id])
+    return {
+        "when": when_json(after, today),
+        "deadline": after.deadline.isoformat() if after.deadline else None,
+        "priority": required_priority(after, today),
+        "row": task_to_json(after, today, show_priority_tags=name in PRIORITY_TAG_LISTS),
+        "place": place_in_list(after, name, today),
+    }
+
+
 def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
     """Apply an edit-view save to Things as one confirmed update."""
     task, token, db_path, missing = load_task_for_write(body.get("id"))
-    if task.completed:
-        raise ApiError(409, "Uncheck the task before editing it.")
     today = today_local()
-    with open_things_db(db_path) as conn:
-        options = read_edit_options(conn)
-    change = plan_edit(task, parse_edit(body.get("changes"), task, options, today), today)
+    change, _ = plan_edit_request(body, task, db_path, today)
     if change is None:
         return {"ok": True}  # Nothing changed.
     blocked = [p for p in missing if change.tags is not None and p in change.tags]
@@ -561,6 +631,16 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
         save_token(body.get("token"))
     except ValueError as error:
         raise ApiError(400, str(error))
+    RefreshPause.paused = False  # A new token may be the fix; try automatic updates again.
+    return {"ok": True}
+
+
+def retry_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Resume automatic updates; the page's next list request tries them again.
+
+    `body` is unused: every POST route takes the request body.
+    """
+    RefreshPause.paused = False
     return {"ok": True}
 
 
@@ -568,6 +648,8 @@ POST_ROUTES = {
     "/api/move": move_task,
     "/api/complete": complete_task,
     "/api/edit": edit_task,
+    "/api/edit/preview": preview_edit,
+    "/api/refresh/retry": retry_refresh,
     "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,

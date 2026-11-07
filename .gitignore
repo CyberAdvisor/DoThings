@@ -1,5 +1,6 @@
-# Runtime logs
+# Runtime logs (errors.log.1 is the older copy kept when the log is capped)
 *.log
+*.log.*
 
 # Local runtime state
 task_order.json

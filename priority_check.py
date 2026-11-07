@@ -6,9 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.26
+Version: 0.1.27
 
 Change log:
+- v0.1.27 (2026-11-07): in_today, predict (an edit's result after the refresh
+  rules), place_in_list and prune_order.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): plan_move keeps a deadline after today when moving into or out of P1; only a missing deadline is set (into P1) and only one of today or earlier is cleared (out of P1).
 - v0.1.24 (2026-11-07): Synchronized module version metadata.
@@ -62,7 +64,7 @@ Change log:
 - v0.1.0 (2026-11-07): Initial release.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -304,6 +306,62 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
     return change
 
 
+def in_today(task: Task, today: date) -> bool:
+    """Return True if Things lists `task` in Today: started, or due today or overdue."""
+    started = task.start_date is not None and task.start_date <= today
+    due = task.deadline is not None and task.deadline <= today
+    return started or due
+
+
+def _applied(task: Task, change: Change) -> Task:
+    """Return a copy of `task` with the tag, date and text fields of `change` applied."""
+    after = replace(task, tags=list(change.tags) if change.tags is not None else list(task.tags))
+    if change.set_deadline is not None:
+        after.deadline = change.set_deadline
+    elif change.clear_deadline:
+        after.deadline = None
+    if change.set_start_date is not None:
+        after.start_date, after.someday = change.set_start_date, False
+    elif change.set_when is not None:
+        after.start_date, after.someday = None, change.set_when == "someday"
+    for name in ("title", "notes", "list_id", "heading_id"):
+        value = getattr(change, "set_" + name)
+        if value is not None:
+            setattr(after, name, value)
+    return after
+
+
+def predict(task: Task, change: Change, today: date) -> Task:
+    """Return `task` as it will be once `change` is applied and the next refresh has run.
+
+    Used to show an edit's result before Things confirms it, so the page never
+    works out the rules itself. Completion is not predicted (edits don't send it).
+    """
+    after = _applied(task, change)
+    if in_today(after, today):
+        refresh = plan_refresh(after, today)  # Only Today tasks get the refresh rules.
+        if refresh is not None:
+            after = _applied(after, refresh)
+    return after
+
+
+def place_in_list(task: Task, name: str, today: date) -> Optional[str]:
+    """Return where `task` appears in the app list `name`, or None if it isn't listed.
+
+    For "today" this is its priority group (P1-P3); for a search, "list".
+    Mirrors the list queries in common.py for a task already refreshed.
+    """
+    if name == "today":
+        return required_priority(task, today) if in_today(task, today) else None
+    if name in ("p1", "p2", "p3"):
+        listed = in_today(task, today) and current_priority(task.tags) == name.upper()
+    elif name == "overdue":
+        listed = task.deadline is not None and task.deadline < today
+    else:
+        raise ValueError(f"Unknown list: {name!r}")
+    return "list" if listed else None
+
+
 def deadline_state(deadline: Optional[date], today: date) -> Optional[str]:
     """Classify a deadline as 'overdue', 'today' or 'future' (None if unset)."""
     if deadline is None:
@@ -423,6 +481,12 @@ def group_today(
     for task in tasks:
         groups[required_priority(task, today)].append(task)
     return {p: completed_last(apply_order(groups[p], order.get(p, []))) for p in PRIORITIES}
+
+
+def prune_order(order: Dict[str, List[str]], keep: Iterable[str]) -> Dict[str, List[str]]:
+    """Return the saved order with only the ids in `keep` (the tasks still in Today)."""
+    kept = set(keep)
+    return {p: [i for i in order.get(p, []) if i in kept] for p in PRIORITIES}
 
 
 def update_order(
