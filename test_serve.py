@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.23
+Version: 0.1.24
 
 Change log:
+- v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): P tags are hidden in Today and the P searches,
   shown only in Overdue.
 - v0.1.22 (2026-11-07): Test that Today's grouped rows leave out P tags and

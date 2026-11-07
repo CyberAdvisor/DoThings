@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.23
+Version: 0.1.24
 
 Change log:
+- v0.1.24 (2026-11-07): P1-P3 searches list only tasks in Today (Today's clause shared via _today_clause).
 - v0.1.23 (2026-11-07): Synchronized module version metadata.
 - v0.1.22 (2026-11-07): Synchronized module version metadata.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
@@ -262,6 +263,21 @@ def _project_rank(heading_id: Optional[str], heading_index: Optional[int], task_
     return (1, heading_index or 0, task_index or 0)
 
 
+def _today_clause(conn: sqlite3.Connection) -> str:
+    """Return the where clause for Things' Today, taking today's packed date twice.
+
+    Today = started tasks dated today or earlier, plus tasks due today or overdue.
+    """
+    deadline_clause = "(t.deadline IS NOT NULL AND t.deadline <= ?"
+    if _has_column(conn, "TMTask", "deadlineSuppressionDate"):
+        deadline_clause += " AND t.deadlineSuppressionDate IS NULL"
+    deadline_clause += ")"
+    return (
+        f"((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
+        f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
+    )
+
+
 def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, list, str]:
     """Return (where clause, params, order clause) for one of APP_LISTS.
 
@@ -269,22 +285,14 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
     `today` is today's date in Things' packed format.
     """
     if name == "today":
-        # Today = started tasks dated today or earlier, plus tasks due today or overdue.
-        deadline_clause = "(t.deadline IS NOT NULL AND t.deadline <= ?"
-        if _has_column(conn, "TMTask", "deadlineSuppressionDate"):
-            deadline_clause += " AND t.deadlineSuppressionDate IS NULL"
-        deadline_clause += ")"
-        where = (
-            f"((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
-            f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
-        )
-        return where, [today, today], "t.todayIndex, t.\"index\""
+        return _today_clause(conn), [today, today], "t.todayIndex, t.\"index\""
     if name in ("p1", "p2", "p3"):
+        # Tasks in Today with the tag: a task tagged for a later start shows once it starts.
         where = (
-            "EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
+            f"{_today_clause(conn)} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
             "ON tg.uuid = tt.tags WHERE tt.tasks = t.uuid AND tg.title = ?)"
         )
-        return where, [name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
+        return where, [today, today, name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
     if name == "overdue":
         where = "t.deadline IS NOT NULL AND t.deadline < ?"
         return where, [today], "t.deadline, t.\"index\""

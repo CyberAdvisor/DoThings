@@ -54,6 +54,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).
 - Every list shows open to-dos plus those completed since local midnight (`status` 3 and `stopDate` ≥ midnight; `stopDate` is Unix time). They come back as `Task.completed_at`, are sorted after open tasks (`completed_last`, oldest completion first), are skipped by the refresh rules, and can't be moved. Canceled to-dos are never shown.
 - Task reads also return `notes`, Someday state (`start` 2 with no `startDate`), `list_id` (`COALESCE(t.project, heading's project, t.area)`) and `heading_id`. A to-do under a heading has `heading` set and `project` NULL.
+- The P1–P3 searches are Today (`_today_clause`) plus the tag, so a tagged task starting later isn't listed until it starts (v0.1.24). Overdue is any open task with a deadline before today.
 - Do Things only queries Today and the searches (`APP_LISTS`). Inbox, Upcoming, Anytime, Someday and Logbook open in Things with `things:///show?id=<list>` (no token needed).
 
 ## Things URL scheme gotchas

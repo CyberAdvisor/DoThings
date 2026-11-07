@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.23
+Version: 0.1.24
 
 Change log:
+- v0.1.24 (2026-11-07): Synchronized module version metadata.
 - v0.1.23 (2026-11-07): P tags are also left out in the P1-P3 searches (the
   search names the priority); only Overdue shows them.
 - v0.1.22 (2026-11-07): Today's grouped rows leave out the P1-P3 tags (the

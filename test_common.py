@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.23
+Version: 0.1.24
 
 Change log:
+- v0.1.24 (2026-11-07): P searches leave out tagged tasks that are not in Today.
 - v0.1.23 (2026-11-07): Synchronized module version metadata.
 - v0.1.22 (2026-11-07): Synchronized module version metadata.
 - v0.1.21 (2026-11-07): Synchronized module version metadata.
@@ -353,8 +354,13 @@ class DatabaseTests(unittest.TestCase):
         self.assertEqual(self._ids("today"), ["today2", "today1", "overdue"])
 
     def test_custom_searches(self) -> None:
+        # P searches list only tasks in Today: tagged tasks starting later, or
+        # with no start date and no due date, are left out until they start.
+        with write_db(self.path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('future', 't1')")
+            conn.execute("INSERT INTO TMTaskTag VALUES ('today2', 't2')")
         self.assertEqual(self._ids("p1"), ["today1"])
-        self.assertEqual(self._ids("p2"), ["anytime"])
+        self.assertEqual(self._ids("p2"), ["today2"])
         self.assertEqual(self._ids("overdue"), ["overdue"])
 
     def test_todos_under_closed_or_trashed_parents_hidden(self) -> None:
