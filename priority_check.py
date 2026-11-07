@@ -6,9 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): Removed `Task.repeating` and `Change.changes_dates`:
+  copies of repeating to-dos can have their dates changed by URL after all.
 - v0.1.7 (2026-11-07): Tasks carry notes, Someday state, list and heading.
   `TaskEdit` and `plan_edit` turn an edit-view save into one Change (priority
   uses the move rules; an explicit deadline or When wins). Change can also set
@@ -52,7 +54,6 @@ class Task:
     someday: bool = False  # In Someday (no start date). False with no date means Anytime.
     list_id: Optional[str] = None  # Project (directly or via its heading) or area id.
     heading_id: Optional[str] = None
-    repeating: bool = False  # A copy of a repeating to-do: Things won't change its dates by URL.
 
     @property
     def completed(self) -> bool:
@@ -84,14 +85,6 @@ class Change:
     set_notes: Optional[str] = None
     set_list_id: Optional[str] = None
     set_heading_id: Optional[str] = None
-
-    @property
-    def changes_dates(self) -> bool:
-        """True if this change sets or clears the deadline or the When."""
-        return (
-            self.set_deadline is not None or self.clear_deadline
-            or self.set_start_date is not None or self.set_when is not None
-        )
 
     def is_satisfied_by(self, task: Task) -> bool:
         """Return True when `task` (re-read from Things) reflects this change."""

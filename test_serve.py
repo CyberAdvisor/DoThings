@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): Removed the repeating-copy refusal test (no longer
+  refused); the task detail returns today's date.
 - v0.1.7 (2026-11-07): Tests for loading a task for editing and saving edits,
   including validation, missing tags, repeating copies and the saved order.
 - v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
@@ -189,7 +191,7 @@ class EditTests(MockThingsTestCase):
         task = detail["task"]
         self.assertEqual((task["priority"], task["when"]), ("P2", {"kind": "today", "date": TODAY.isoformat()}))
         self.assertEqual(task["tags"], [])
-        self.assertFalse(task["repeating"])
+        self.assertEqual(detail["today"], TODAY.isoformat())
         self.assertEqual(detail["options"]["tags"], ["Home"])
         self.assertEqual([p["id"] for p in detail["options"]["projects"]], ["proj1"])
         with self.assertRaises(serve.ApiError):
@@ -239,18 +241,6 @@ class EditTests(MockThingsTestCase):
             self.edit(priority="P3")
         self.assertIn("Create the P3 tag", raised.exception.message)
         self.edit(title="Fine without tags")  # No tags sent, so allowed.
-        self.apply_change.assert_called_once()
-
-    def test_repeating_copy_dates_refused(self) -> None:
-        with write_db(self.db_path) as conn:
-            conn.execute("UPDATE TMTask SET rt1_repeatingTemplate = 'tmpl' WHERE uuid = 'task1'")
-        for changes in ({"deadline": "2026-11-20"}, {"when": "someday"}, {"priority": "P1"}):
-            with self.subTest(changes=changes), self.assertRaises(serve.ApiError) as raised:
-                self.edit(**changes)
-            self.assertIn("repeating", raised.exception.message)
-        with self.assertRaises(serve.ApiError):
-            serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]})
-        self.edit(title="Renamed", priority="P3")  # P2 -> P3 changes no dates.
         self.apply_change.assert_called_once()
 
     def test_unconfirmed_edit_reported(self) -> None:

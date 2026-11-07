@@ -8,9 +8,12 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): Copies of repeating to-dos are no longer refused date
+  changes (tested: Things applies them). /api/task also returns today's date
+  for the date picker.
 - v0.1.7 (2026-11-07): New GET /api/task returns one task with the edit-view
   choices; POST /api/edit validates an edit and sends it to Things as one
   update (a priority change also updates the saved order). Moves and edits
@@ -69,7 +72,6 @@ from priority_check import (
     PRIORITIES,
     PRIORITY_LABELS,
     WHEN_KEYWORDS,
-    Change,
     Task,
     TaskEdit,
     completed_last,
@@ -223,20 +225,6 @@ def load_task_for_write(task_id: object) -> Tuple[Task, str, str, List[str]]:
     return task, token, db_path, missing
 
 
-def refuse_date_change_on_repeating(task: Task, change: Change) -> None:
-    """Refuse a deadline or When change on a copy of a repeating to-do.
-
-    Things ignores such changes from its URL command, so the write could never
-    be confirmed and would look like a token problem.
-    """
-    if task.repeating and change.changes_dates:
-        raise ApiError(
-            409,
-            "This is a copy of a repeating to-do. Things doesn't let Do Things change its "
-            "deadline or When, which this change needs. Change it in Things.",
-        )
-
-
 def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     """Move a task to another priority, then save the new order once Things confirms."""
     priority, ids = parse_order(body)
@@ -246,9 +234,7 @@ def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     if priority in missing:
         # Things would silently drop the unknown tag, so the move could never be confirmed.
         raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
-    change = plan_move(task, priority, today_local())
-    refuse_date_change_on_repeating(task, change)
-    if not apply_change(change, token, db_path):
+    if not apply_change(plan_move(task, priority, today_local()), token, db_path):
         # Order is only recorded after Things confirms the move.
         return {"ok": False, "write_failed": True}
     save_order(update_order(load_order(), priority, ids))
@@ -298,9 +284,8 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         priority=required_priority(task, today),
         list_id=task.list_id,
         heading_id=task.heading_id,
-        repeating=task.repeating,
     )
-    return {"task": detail, "options": options}
+    return {"task": detail, "options": options, "today": today.isoformat()}
 
 
 def _parse_date(value: object, field: str) -> date:
@@ -382,7 +367,6 @@ def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
     change = plan_edit(task, parse_edit(body.get("changes"), task, options, today), today)
     if change is None:
         return {"ok": True}  # Nothing changed.
-    refuse_date_change_on_repeating(task, change)
     blocked = [p for p in missing if change.tags is not None and p in change.tags]
     if blocked:
         # Things would silently drop the unknown tag, so the edit could never be confirmed.

@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): No longer reads whether a task is a copy of a
+  repeating to-do; nothing uses it now.
 - v0.1.7 (2026-11-07): Tasks are read with notes, Someday state, list and
   heading, and whether they are copies of a repeating to-do. Update URLs can
   set title, notes, When anytime/someday, list-id and
@@ -172,7 +174,6 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 _TASK_SELECT = f"""
 SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
-       t.rt1_repeatingTemplate IS NOT NULL AS repeating,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
@@ -216,7 +217,6 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         someday=row["start"] == START_SOMEDAY and row["startDate"] is None,
         list_id=row["list_id"],
         heading_id=row["heading_id"],
-        repeating=bool(row["repeating"]),
     )
 
 

@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): Dropped the repeating-copy column and checks.
 - v0.1.7 (2026-11-07): Tests for the edit fields read from the database,
   read_edit_options, and the new update URL parameters.
 - v0.1.6 (2026-11-07): Tests for tasks completed today appearing in the lists
@@ -74,7 +75,7 @@ CREATE TABLE TMTask (
     uuid TEXT PRIMARY KEY, title TEXT, type INTEGER, status INTEGER, trashed INTEGER,
     start INTEGER, startDate INTEGER, deadline INTEGER, deadlineSuppressionDate INTEGER,
     todayIndex INTEGER, "index" INTEGER, project TEXT, heading TEXT, area TEXT,
-    stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT
+    stopDate REAL, rt1_recurrenceRule BLOB, notes TEXT
 );
 CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
@@ -331,17 +332,16 @@ class DatabaseTests(unittest.TestCase):
             )
             conn.execute(
                 "INSERT INTO TMTask (uuid, title, notes, type, status, trashed, start, heading, "
-                f"rt1_repeatingTemplate, \"index\") VALUES ('undr', 'Under heading', 'Some notes', 0, "
-                f"{STATUS_OPEN}, 0, {START_SOMEDAY}, 'head1', 'tmpl', 0)"
+                f"\"index\") VALUES ('undr', 'Under heading', 'Some notes', 0, "
+                f"{STATUS_OPEN}, 0, {START_SOMEDAY}, 'head1', 0)"
             )
         with open_things_db(self.path) as conn:
             task = read_task(conn, "undr")
             self.assertEqual((task.notes, task.list_id, task.heading_id), ("Some notes", "proj1", "head1"))
             self.assertTrue(task.someday)
-            self.assertTrue(task.repeating)
             plain = read_task(conn, "today2")
             self.assertEqual((plain.notes, plain.list_id, plain.heading_id), ("", "area1", None))
-            self.assertFalse(plain.someday or plain.repeating)
+            self.assertFalse(plain.someday)
             options = read_edit_options(conn)
         self.assertEqual(options["tags"], ["Home, Office"])
         self.assertEqual(options["areas"], [{"id": "area1", "title": "Work"}])

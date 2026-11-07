@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.7
+  Version: 0.1.8
 
   Change log:
+  - v0.1.8 (2026-11-07): When and Deadline open a date picker (calendar with
+    Today/Someday/Anytime or Clear) instead of a menu and date field. Copies
+    of repeating to-dos are no longer locked.
   - v0.1.7 (2026-11-07): Clicking a task expands it into an inline editor
     (title, notes, tags, When, deadline, project/area and heading, priority)
     with Save and Cancel; empty fields are added with buttons. Open in Things
@@ -141,6 +144,26 @@
   .editor .foot { display: flex; align-items: center; gap: 8px; margin-left: 26px; }
   .editor .adders { display: flex; gap: 4px; margin-left: auto; }
   .editor .adders button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 2px 8px; font-size: 12px; }
+  .editor .ed-date {
+    background: none; border: 1px solid transparent; color: var(--text); padding: 2px 6px; font-size: 13px;
+  }
+  .editor .ed-date:hover { border-color: var(--line); }
+  .editor .ed-date.overdue { color: var(--red); }
+  /* Date picker popover under the When or Deadline row. */
+  .picker {
+    margin-left: 26px; width: 236px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); box-shadow: 0 4px 14px rgba(0, 0, 0, .25); font-size: 12px;
+  }
+  .picker .quick { display: flex; gap: 4px; margin-bottom: 6px; }
+  .picker .quick button { flex: 1; padding: 3px 4px; font-size: 12px; background: var(--hover); color: var(--text); }
+  .picker .month { display: flex; align-items: center; justify-content: space-between; margin: 4px 0; font-weight: 600; }
+  .picker .month button { background: none; border: none; color: var(--text); padding: 0 8px; font-size: 14px; }
+  .picker .grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; }
+  .picker .grid .dow { color: var(--muted); font-size: 11px; }
+  .picker .grid button { background: none; border: 1px solid transparent; color: var(--text); padding: 3px 0; border-radius: 6px; }
+  .picker .grid button:hover { background: var(--hover); }
+  .picker .grid button.today { color: var(--accent); font-weight: 700; }
+  .picker .grid button.chosen { background: var(--accent); color: #fff; }
   .editor .ed-status { color: var(--red); font-size: 12px; margin-left: 26px; min-height: 0; }
   .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
   /* Setup screen */
@@ -487,9 +510,6 @@ async function toggleComplete(row, task) {
 
 // --- Inline editor ----------------------------------------------------------
 
-// Choices for When, in menu order.
-const WHEN_CHOICES = [["today", "Today"], ["date", "Date…"], ["anytime", "Anytime"], ["someday", "Someday"]];
-
 /**
  * Expand a task row into the inline editor. `state.edit` holds the task as
  * loaded (`task`), the edit-view choices (`options`), the edited copy
@@ -501,9 +521,11 @@ async function startEdit(row, id) {
   if (state.busy || state.drag) return;
   state.busy = true;
   try {
-    const { task, options } = await api(`/api/task?id=${encodeURIComponent(id)}`);
+    const { task, options, today } = await api(`/api/task?id=${encodeURIComponent(id)}`);
     state.edit = {
-      task, options, card: row,
+      task, options, today, card: row,
+      picker: null,       // "when" or "deadline" while that date picker is open.
+      pickerMonth: null,  // First day of the month the picker shows (YYYY-MM-01).
       draft: {
         title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
         priority: task.priority, tags: [...task.tags], list_id: task.list_id, heading_id: task.heading_id,
@@ -558,11 +580,13 @@ function selectOf(pairs, value) {
 /** Build the editor card from state.edit. Structural changes rebuild it via redrawEditor. */
 function buildEditor() {
   const { task, options, draft, shown } = state.edit;
-  const locked = task.completed;          // Completed tasks are shown read-only.
-  const datesLocked = locked || task.repeating; // Things won't change a repeating copy's dates.
+  const locked = task.completed; // Completed tasks are shown read-only.
   const card = el("div", "editor");
   card.dataset.id = task.id;
-  card.onkeydown = (event) => { if (event.key === "Escape") closeEditor(); };
+  card.onkeydown = (event) => {
+    if (event.key !== "Escape") return;
+    if (state.edit.picker) closePicker(); else closeEditor(); // Escape closes the picker first.
+  };
 
   // Title, with the checkbox shown for context.
   const head = el("div", "head");
@@ -601,37 +625,21 @@ function buildEditor() {
   }
 
   if (shown.when) {
-    const kind = selectOf(WHEN_CHOICES, draft.when.kind);
-    kind.disabled = datesLocked;
-    kind.onchange = () => {
-      draft.when.kind = kind.value;
-      if (kind.value === "date" && !draft.when.date) draft.when.date = "";
-      redrawEditor();
-    };
-    const parts = [kind];
-    if (draft.when.kind === "date") {
-      const day = el("input");
-      day.type = "date";
-      day.value = draft.when.date || "";
-      day.disabled = datesLocked;
-      day.onchange = () => { draft.when.date = day.value; };
-      parts.push(day);
-    }
-    card.append(editorRow("★ When", ...parts));
+    const label = { today: "★ Today", someday: "Someday", anytime: "Anytime" }[draft.when.kind]
+      || "📅 " + dateLabel(draft.when.date);
+    card.append(editorRow("When", dateButton(label, "when", false)));
+    if (state.edit.picker === "when") card.append(buildPicker("when"));
   }
 
   if (shown.deadline) {
-    const day = el("input");
-    day.type = "date";
-    day.value = draft.deadline;
-    day.disabled = datesLocked;
-    day.onchange = () => { draft.deadline = day.value; };
+    const overdue = draft.deadline && draft.deadline < state.edit.today;
+    const button = dateButton(draft.deadline ? "⚑ " + dateLabel(draft.deadline) : "⚑ Pick a date", "deadline", overdue);
     const clear = el("button", "ed-x", "✕");
     clear.type = "button";
     clear.title = "Remove deadline";
-    clear.disabled = datesLocked;
-    clear.onclick = () => { draft.deadline = ""; shown.deadline = false; redrawEditor(); };
-    card.append(editorRow("⚑ Deadline", day, clear));
+    clear.onclick = () => { draft.deadline = ""; shown.deadline = false; state.edit.picker = null; redrawEditor(); };
+    card.append(editorRow("Deadline", button, clear));
+    if (state.edit.picker === "deadline") card.append(buildPicker("deadline"));
   }
 
   if (shown.list) {
@@ -676,9 +684,6 @@ function buildEditor() {
     card.append(el("div", "note",
       "Moving into P1 sets the deadline to today; moving out of P1 removes it. A deadline you set here wins."));
   }
-  if (task.repeating) {
-    card.append(el("div", "note", "Copy of a repeating to-do: change its When or deadline in Things."));
-  }
   if (locked) {
     card.append(el("div", "note", "Completed. Uncheck it to edit."));
     for (const input of card.querySelectorAll("input, textarea, select, button")) input.disabled = true;
@@ -698,15 +703,14 @@ function buildEditor() {
   foot.append(save, cancel, things);
   if (!locked) {
     const adders = el("span", "adders");
-    for (const [key, label, dateField] of [
-      ["tags", "+ Tags", false], ["when", "+ When", true], ["deadline", "+ Deadline", true], ["list", "+ Project", false],
-    ]) {
-      if (shown[key] || (dateField && task.repeating)) continue;
+    for (const [key, label] of [["tags", "+ Tags"], ["when", "+ When"], ["deadline", "+ Deadline"], ["list", "+ Project"]]) {
+      if (shown[key]) continue;
       const add = el("button", "", label);
       add.type = "button";
       add.onclick = () => {
         shown[key] = true;
-        if (key === "when") draft.when = { kind: "today", date: null };
+        // Dates are chosen in the picker, which opens straight away.
+        if (key === "when" || key === "deadline") openPicker(key);
         redrawEditor();
       };
       adders.append(add);
@@ -715,6 +719,117 @@ function buildEditor() {
   }
   card.append(foot, el("div", "ed-status"));
   return card;
+}
+
+// --- Date picker -------------------------------------------------------------
+
+/** Format YYYY-MM-DD as "Sat, Nov 7" (with the year if it isn't this year). */
+function dateLabel(iso) {
+  const day = new Date(iso + "T12:00:00"); // Noon, so no time zone shifts the date.
+  const options = { weekday: "short", month: "short", day: "numeric" };
+  if (iso.slice(0, 4) !== state.edit.today.slice(0, 4)) options.year = "numeric";
+  return day.toLocaleDateString(undefined, options);
+}
+
+/** A row button showing a date; clicking it opens or closes that row's picker. */
+function dateButton(label, which, overdue) {
+  const button = el("button", "ed-date" + (overdue ? " overdue" : ""), label);
+  button.type = "button";
+  button.onclick = () => {
+    if (state.edit.picker === which) closePicker(); else { openPicker(which); redrawEditor(); }
+  };
+  return button;
+}
+
+/** Open the picker for "when" or "deadline", showing the month of its current date. */
+function openPicker(which) {
+  const { draft, today } = state.edit;
+  const current = which === "when" ? draft.when.date : draft.deadline;
+  state.edit.picker = which;
+  state.edit.pickerMonth = (current || today).slice(0, 8) + "01";
+}
+
+/** Close the picker. A row opened with + and left without a date is hidden again. */
+function closePicker() {
+  const { draft, shown, task } = state.edit;
+  if (state.edit.picker === "deadline" && !draft.deadline) shown.deadline = false;
+  if (state.edit.picker === "when" && draft.when.kind === "anytime" && task.when.kind === "anytime") {
+    shown.when = false;
+  }
+  state.edit.picker = null;
+  redrawEditor();
+}
+
+/** Set the chosen date (or keyword for When) and close the picker. */
+function pickDate(which, value) {
+  const { draft, today } = state.edit;
+  if (which === "deadline") draft.deadline = value;
+  else if (value === "someday" || value === "anytime") draft.when = { kind: value, date: null };
+  else draft.when = { kind: value === today ? "today" : "date", date: value };
+  state.edit.picker = null;
+  redrawEditor();
+}
+
+/** Pad a number to two digits. */
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+/** Build the date picker: quick choices, a month header and a calendar grid. */
+function buildPicker(which) {
+  const { draft, today, pickerMonth } = state.edit;
+  const chosen = which === "deadline" ? draft.deadline : draft.when.date;
+  const picker = el("div", "picker");
+  const quick = el("div", "quick");
+  const choices = which === "when"
+    ? [["★ Today", today], ["Someday", "someday"], ["Anytime", "anytime"]]
+    : [["Today", today], ["Clear", ""]];
+  for (const [label, value] of choices) {
+    const button = el("button", "", label);
+    button.type = "button";
+    button.onclick = () => {
+      if (which === "deadline" && value === "") {
+        draft.deadline = "";
+        closePicker();
+      } else {
+        pickDate(which, value);
+      }
+    };
+    quick.append(button);
+  }
+  picker.append(quick);
+
+  const [year, month] = pickerMonth.split("-").map(Number);
+  const header = el("div", "month");
+  const prev = el("button", "", "‹");
+  const next = el("button", "", "›");
+  prev.type = next.type = "button";
+  const shift = (delta) => {
+    const first = new Date(year, month - 1 + delta, 1);
+    state.edit.pickerMonth = `${first.getFullYear()}-${pad2(first.getMonth() + 1)}-01`;
+    redrawEditor();
+  };
+  prev.onclick = () => shift(-1);
+  next.onclick = () => shift(1);
+  const title = new Date(year, month - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  header.append(prev, el("span", "", title), next);
+  picker.append(header);
+
+  const grid = el("div", "grid");
+  for (const dow of ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]) grid.append(el("span", "dow", dow));
+  const firstWeekday = new Date(year, month - 1, 1).getDay();
+  for (let i = 0; i < firstWeekday; i++) grid.append(el("span"));
+  const days = new Date(year, month, 0).getDate();
+  for (let day = 1; day <= days; day++) {
+    const iso = `${year}-${pad2(month)}-${pad2(day)}`;
+    const classes = [iso === today ? "today" : "", iso === chosen ? "chosen" : ""].join(" ").trim();
+    const button = el("button", classes, String(day));
+    button.type = "button";
+    button.onclick = () => pickDate(which, iso);
+    grid.append(button);
+  }
+  picker.append(grid);
+  return picker;
 }
 
 /** Compare the draft with the task as loaded; return {changes} or {error}. */
@@ -726,7 +841,6 @@ function editorChanges() {
   if (draft.notes !== task.notes) changes.notes = draft.notes;
   const when = draft.when;
   if (when.kind !== task.when.kind || (when.kind === "date" && when.date !== task.when.date)) {
-    if (when.kind === "date" && !when.date) return { error: "Pick a date for When." };
     changes.when = when.kind === "date" ? when.date : when.kind;
   }
   if (draft.deadline !== (task.deadline || "")) changes.deadline = draft.deadline;
@@ -859,6 +973,11 @@ async function start() {
   load();
   setInterval(load, REFRESH_MS);
   window.addEventListener("focus", load);
+  // A click outside an open date picker (and its row button) closes it, as in Things.
+  // "click" (not "mousedown") so the clicked control, e.g. Save, acts first.
+  document.addEventListener("click", (event) => {
+    if (state.edit && state.edit.picker && !event.target.closest(".picker, .ed-date")) closePicker();
+  });
 }
 
 start();

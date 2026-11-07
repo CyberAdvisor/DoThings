@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.7
+Version: 0.1.8
 
 Change log:
+- v0.1.8 (2026-11-07): Removed the Change.changes_dates test with the property.
 - v0.1.7 (2026-11-07): Tests for plan_edit, the new Change fields and
   Change.changes_dates.
 - v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
@@ -139,7 +140,8 @@ class PlanEditTests(unittest.TestCase):
         change = plan_edit(make_task(tags=["P2"]), TaskEdit(title="New", notes="Body"), TODAY)
         self.assertEqual((change.set_title, change.set_notes), ("New", "Body"))
         self.assertIsNone(change.tags)
-        self.assertFalse(change.changes_dates)
+        self.assertIsNone(change.set_deadline)
+        self.assertIsNone(change.set_start_date)
 
     def test_priority_uses_move_rules(self) -> None:
         change = plan_edit(make_task(tags=["Home", "P2"]), TaskEdit(priority="P1"), TODAY)
@@ -191,12 +193,6 @@ class PlanEditTests(unittest.TestCase):
         anytime = Task(uuid="A1", title="T")
         self.assertTrue(Change("A1", None, set_when="anytime").is_satisfied_by(anytime))
         self.assertFalse(Change("A1", None, set_when="anytime").is_satisfied_by(make_task(start_date=TODAY)))
-
-    def test_changes_dates(self) -> None:
-        self.assertFalse(Change("A1", ["P2"]).changes_dates)
-        for change in (Change("A1", None, set_deadline=TODAY), Change("A1", None, clear_deadline=True),
-                       Change("A1", None, set_start_date=TODAY), Change("A1", None, set_when="someday")):
-            self.assertTrue(change.changes_dates)
 
 
 class PlanMoveTests(unittest.TestCase):

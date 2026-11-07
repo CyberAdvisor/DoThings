@@ -43,7 +43,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - Tags: `TMTaskTag(tasks, tags)` joins `TMTag(uuid, title)`. Tag titles are concatenated with `char(31)` because titles can contain commas.
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).
 - Every list shows open to-dos plus those completed since local midnight (`status` 3 and `stopDate` ≥ midnight; `stopDate` is Unix time). They come back as `Task.completed_at`, are sorted after open tasks (`completed_last`, oldest completion first), are skipped by the refresh rules, and can't be moved. Canceled to-dos are never shown.
-- Task reads also return `notes`, Someday state (`start` 2 with no `startDate`), `list_id` (`COALESCE(t.project, heading's project, t.area)`) and `heading_id`. A to-do under a heading has `heading` set and `project` NULL. `rt1_repeatingTemplate` is set on copies of repeating to-dos (`Task.repeating`).
+- Task reads also return `notes`, Someday state (`start` 2 with no `startDate`), `list_id` (`COALESCE(t.project, heading's project, t.area)`) and `heading_id`. A to-do under a heading has `heading` set and `project` NULL.
 - Do Things only queries Today and the searches (`APP_LISTS`). Inbox, Upcoming, Anytime, Someday and Logbook open in Things with `things:///show?id=<list>` (no token needed).
 
 ## Things URL scheme gotchas
@@ -52,7 +52,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - A wrong auth token also fails silently. The only symptom is that the change never appears, which is reported as `write_failed`.
 - Unknown tags are dropped silently, so while P1, P2 or P3 is missing Do Things sends no writes (refresh skipped, moves to a missing priority refused with instructions). Otherwise a missing tag shows up as an unconfirmed write, which looks like a token problem.
 - The inline editor (`GET /api/task`, `POST /api/edit`) sends one update built by `plan_edit`: only changed fields; a priority change uses the move rules, and an explicit deadline or When wins. Allowed values are checked against Things' data (`read_edit_options`). `title`, `notes`, `when` (date, `anytime`, `someday`), `list-id` (project or area) and `heading-id` are sent. Things' URL command can't remove a to-do from a project/area/heading, delete it, or edit checklists safely (replacing resets ticks), so the editor doesn't offer those.
-- Things ignores `when`/`deadline` on copies of repeating to-dos, so moves and edits that change dates on them are refused up front (`refuse_date_change_on_repeating`).
+- Things' URL docs say `when`, `deadline` and `completed` "cannot be updated on repeating to-dos". That means the repeating template (never shown, since `rt1_recurrenceRule` rows are excluded): on 2026-11-07 a real copy in Today accepted `when=<date>`. v0.1.7 wrongly locked copies; v0.1.8 removed that.
 - `completed=true` / `completed=false` completes or reopens a to-do. `Change.tags` is None for these, so no `tags=` is sent and the tags are left alone.
 - `deadline=` with an empty value clears the deadline. `when=YYYY-MM-DD` sets the start date.
 - Commas between tags are sent unencoded and spaces as `%20`, matching Things' documented format.
