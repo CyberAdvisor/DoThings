@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.7 (2026-11-07):** Click a task to edit it in place, like Things: title, notes, tags, When, deadline, project or area and heading, and priority, with Save and Cancel. Empty fields are added with the buttons at the bottom of the card. **Open in Things** is now in the card. Copies of repeating to-dos can't have their When or deadline changed from Do Things.
 - **v0.1.6 (2026-11-07):** Every task in Today and the P1, P2, P3 and Overdue searches has a checkbox. Checking it completes the task in Things and shows it dim gray and struck through at the bottom of its group until the end of the day; unchecking reopens it. Warning messages after a failed move or check now stay visible.
 - **v0.1.5 (2026-11-07):** Inbox, Upcoming, Anytime, Someday and Logbook now open in Things instead of in Do Things (marked with an arrow in the sidebar). While a P tag is missing in Things, Do Things changes no tags and explains step by step how to create them, instead of reporting a token problem. The token warning now lists what to check, in order. Browser disconnects no longer print errors in Terminal or `errors.log`.
 - **v0.1.4 (2026-11-07):** Pushing a new version to `main` now creates its `vX.Y.Z` tag and GitHub release automatically, with the commit message as the release notes. `.gitignore` now also ignores Python's `__pycache__/` folder.
@@ -28,7 +29,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
 - Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day. Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
-- Click a task to open it in Things for editing.
+- Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline, project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things. While a card is open, the list doesn't refresh and tasks can't be dragged.
 - The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things.
 - If the P1, P2 or P3 tag doesn't exist in Things, Do Things changes no tags and shows how to create them.
 
@@ -118,6 +119,7 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 - Today membership is worked out from start dates and deadlines. It may differ slightly from Things in edge cases, such as tasks inside a project that is itself scheduled later.
 - The custom searches are fixed (P1, P2, P3, Overdue). New ones are added in code.
 - Each change waits up to 5 seconds for Things to confirm it, so moves take a moment.
+- The editor can't delete a task, edit its checklist, change repeat settings or attachments, take a task out of a project, area or heading, or change the When or deadline of a copy of a repeating to-do (including priority changes that would need a deadline change). Use **Open in Things** for those.
 
 ## Customizing this with Claude
 Start a new conversation with Claude, paste in `CLAUDE_CONTEXT.md` and `AGENTS.md`, and describe the change you want. Ask Claude to confirm the design and file list before writing code, to run the verification commands in `AGENTS.md`, and to follow the release checklist (version bump, change logs, commit, tag, release).

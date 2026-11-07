@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): Tests for plan_edit, the new Change fields and
+  Change.changes_dates.
 - v0.1.6 (2026-11-07): Tests for completing and reopening tasks, and for
   completed tasks sorting last and being skipped by the refresh rules.
 - v0.1.5 (2026-11-07): Synchronized module version metadata.
@@ -19,12 +21,14 @@ from datetime import date, timedelta
 from priority_check import (
     Change,
     Task,
+    TaskEdit,
     apply_order,
     completed_last,
     current_priority,
     deadline_state,
     group_today,
     plan_completion,
+    plan_edit,
     plan_move,
     plan_refresh,
     required_priority,
@@ -123,6 +127,76 @@ class CompletionTests(unittest.TestCase):
         tasks = [make_task("done", tags=["P2"], completed_at=100.0), make_task("open", tags=["P2"])]
         groups = group_today(tasks, {"P2": ["done", "open"]}, TODAY)
         self.assertEqual([t.uuid for t in groups["P2"]], ["open", "done"])
+
+
+class PlanEditTests(unittest.TestCase):
+    """Turning an edit-view save into one Change."""
+
+    def test_nothing_changed(self) -> None:
+        self.assertIsNone(plan_edit(make_task(tags=["P2"]), TaskEdit(), TODAY))
+
+    def test_text_fields_only(self) -> None:
+        change = plan_edit(make_task(tags=["P2"]), TaskEdit(title="New", notes="Body"), TODAY)
+        self.assertEqual((change.set_title, change.set_notes), ("New", "Body"))
+        self.assertIsNone(change.tags)
+        self.assertFalse(change.changes_dates)
+
+    def test_priority_uses_move_rules(self) -> None:
+        change = plan_edit(make_task(tags=["Home", "P2"]), TaskEdit(priority="P1"), TODAY)
+        self.assertEqual(change.tags, ["Home", "P1"])
+        self.assertEqual(change.set_deadline, TODAY)
+
+    def test_explicit_deadline_wins_over_move_rules(self) -> None:
+        later = TODAY + timedelta(days=5)
+        change = plan_edit(make_task(tags=["P2"]), TaskEdit(priority="P1", deadline=later), TODAY)
+        self.assertEqual(change.set_deadline, later)
+        change = plan_edit(make_task(tags=["P1"], deadline=TODAY), TaskEdit(priority="P2", deadline=later), TODAY)
+        self.assertEqual(change.set_deadline, later)
+        self.assertFalse(change.clear_deadline)
+
+    def test_explicit_when_wins_over_move_rules(self) -> None:
+        # Out of P1 for a deadline-only task would set the start date to today.
+        task = make_task(tags=["P1"], deadline=TODAY)
+        change = plan_edit(task, TaskEdit(priority="P3", when_keyword="someday"), TODAY)
+        self.assertIsNone(change.set_start_date)
+        self.assertEqual(change.set_when, "someday")
+
+    def test_same_priority_is_not_a_move(self) -> None:
+        self.assertIsNone(plan_edit(make_task(tags=["P2"]), TaskEdit(priority="P2"), TODAY))
+
+    def test_other_tags_keep_priority_tag(self) -> None:
+        change = plan_edit(make_task(tags=["Home", "P3"]), TaskEdit(other_tags=["Work"]), TODAY)
+        self.assertEqual(change.tags, ["Work", "P3"])
+        change = plan_edit(make_task(tags=["Home", "P3"]), TaskEdit(other_tags=[], priority="P2"), TODAY)
+        self.assertEqual(change.tags, ["P2"])
+
+    def test_clear_deadline_and_list_heading(self) -> None:
+        change = plan_edit(
+            make_task(tags=["P2"], deadline=TOMORROW),
+            TaskEdit(clear_deadline=True, list_id="proj", heading_id="head"), TODAY,
+        )
+        self.assertTrue(change.clear_deadline)
+        self.assertEqual((change.set_list_id, change.set_heading_id), ("proj", "head"))
+
+    def test_unknown_when_keyword_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            plan_edit(make_task(), TaskEdit(when_keyword="evening"), TODAY)
+
+    def test_new_fields_confirmed(self) -> None:
+        task = Task(uuid="A1", title="T", notes="N", someday=True, list_id="L", heading_id="H")
+        self.assertTrue(Change("A1", None, set_title="T", set_notes="N", set_when="someday",
+                               set_list_id="L", set_heading_id="H").is_satisfied_by(task))
+        self.assertFalse(Change("A1", None, set_when="anytime").is_satisfied_by(task))
+        self.assertFalse(Change("A1", None, set_title="Other").is_satisfied_by(task))
+        anytime = Task(uuid="A1", title="T")
+        self.assertTrue(Change("A1", None, set_when="anytime").is_satisfied_by(anytime))
+        self.assertFalse(Change("A1", None, set_when="anytime").is_satisfied_by(make_task(start_date=TODAY)))
+
+    def test_changes_dates(self) -> None:
+        self.assertFalse(Change("A1", ["P2"]).changes_dates)
+        for change in (Change("A1", None, set_deadline=TODAY), Change("A1", None, clear_deadline=True),
+                       Change("A1", None, set_start_date=TODAY), Change("A1", None, set_when="someday")):
+            self.assertTrue(change.changes_dates)
 
 
 class PlanMoveTests(unittest.TestCase):

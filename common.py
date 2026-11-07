@@ -3,9 +3,14 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): Tasks are read with notes, Someday state, list and
+  heading, and whether they are copies of a repeating to-do. Update URLs can
+  set title, notes, When anytime/someday, list-id and
+  heading-id. read_edit_options lists tags, areas, projects and headings for
+  the edit view.
 - v0.1.6 (2026-11-07): Lists include tasks completed today (shown checked);
   tasks carry their completion time. Update URLs can complete or reopen a task
   and leave tags alone when a change has no tag list.
@@ -69,7 +74,7 @@ CONFIRM_POLL_SECONDS = 0.25
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 
 # Things TMTask column values used by the queries (full list in CLAUDE_CONTEXT.md).
-TYPE_TODO = 0
+TYPE_TODO, TYPE_PROJECT, TYPE_HEADING = 0, 1, 2
 STATUS_OPEN, STATUS_COMPLETED = 0, 3
 START_ANYTIME, START_SOMEDAY = 1, 2
 
@@ -165,7 +170,9 @@ def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
 # Columns shared by every task query. Tags are concatenated with the ASCII unit
 # separator (char 31) because tag names may contain commas.
 _TASK_SELECT = f"""
-SELECT t.uuid, t.title, t.startDate, t.deadline, t.status, t.stopDate,
+SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
+       COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
+       t.rt1_repeatingTemplate IS NOT NULL AS repeating,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
@@ -205,6 +212,11 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         deadline=unpack_things_date(row["deadline"]),
         context=row["context"] or "",
         completed_at=row["stopDate"] if row["status"] == STATUS_COMPLETED else None,
+        notes=row["notes"] or "",
+        someday=row["start"] == START_SOMEDAY and row["startDate"] is None,
+        list_id=row["list_id"],
+        heading_id=row["heading_id"],
+        repeating=bool(row["repeating"]),
     )
 
 
@@ -253,6 +265,40 @@ def read_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return _row_to_task(row) if row else None
 
 
+def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:
+    """Return the choices for the edit view.
+
+    `tags`: every non-priority tag title. `areas`: [{id, title}].
+    `projects`: open, untrashed projects as [{id, title, area}].
+    `headings`: open, untrashed headings as [{id, title, project}].
+    All sorted by title except headings, which keep Things' order.
+    """
+    tags = [
+        row["title"] for row in conn.execute("SELECT title FROM TMTag ORDER BY title COLLATE NOCASE")
+        if row["title"] not in PRIORITIES
+    ]
+    areas = [
+        {"id": row["uuid"], "title": row["title"] or ""}
+        for row in conn.execute("SELECT uuid, title FROM TMArea ORDER BY title COLLATE NOCASE")
+    ]
+    open_untrashed = f"status = {STATUS_OPEN} AND trashed = 0"
+    projects = [
+        {"id": row["uuid"], "title": row["title"] or "", "area": row["area"]}
+        for row in conn.execute(
+            f"SELECT uuid, title, area FROM TMTask WHERE type = {TYPE_PROJECT} AND {open_untrashed} "
+            "ORDER BY title COLLATE NOCASE"
+        )
+    ]
+    headings = [
+        {"id": row["uuid"], "title": row["title"] or "", "project": row["project"]}
+        for row in conn.execute(
+            f"SELECT uuid, title, project FROM TMTask WHERE type = {TYPE_HEADING} AND {open_untrashed} "
+            "ORDER BY \"index\""
+        )
+    ]
+    return {"tags": tags, "areas": areas, "projects": projects, "headings": headings}
+
+
 def missing_priority_tags(conn: sqlite3.Connection) -> List[str]:
     """Return the P tags that do not exist in Things (the URL scheme ignores unknown tags)."""
     existing = {row["title"] for row in conn.execute("SELECT title FROM TMTag")}
@@ -284,6 +330,16 @@ def build_update_url(change: Change, token: str) -> str:
         params["deadline"] = ""  # An empty value clears the deadline.
     if change.set_start_date is not None:
         params["when"] = change.set_start_date.isoformat()
+    elif change.set_when is not None:
+        params["when"] = change.set_when
+    if change.set_title is not None:
+        params["title"] = change.set_title
+    if change.set_notes is not None:
+        params["notes"] = change.set_notes
+    if change.set_list_id is not None:
+        params["list-id"] = change.set_list_id
+    if change.set_heading_id is not None:
+        params["heading-id"] = change.set_heading_id
     if change.set_completed is not None:
         params["completed"] = "true" if change.set_completed else "false"
     return "things:///update?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe=",")

@@ -1,16 +1,20 @@
 """Do Things local server.
 
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
-reads Things, applies the priority rules, moves, reorders, completes and
-reopens tasks, opens
+reads Things, applies the priority rules, moves, reorders, edits, completes
+and reopens tasks, opens
 tasks and Things' own lists in Things, and stores the Things auth token on
 first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): New GET /api/task returns one task with the edit-view
+  choices; POST /api/edit validates an edit and sends it to Things as one
+  update (a priority change also updates the saved order). Moves and edits
+  that would change the dates of a copy of a repeating to-do are refused.
 - v0.1.6 (2026-11-07): New /api/complete completes or reopens a task (no P tags
   needed). Lists include tasks completed today, sent with `completed` and
   sorted after open tasks. Moving a completed task is refused.
@@ -54,6 +58,7 @@ from common import (
     missing_priority_tags,
     open_things_db,
     open_things_url,
+    read_edit_options,
     read_list,
     read_task,
     save_order,
@@ -63,13 +68,18 @@ from common import (
 from priority_check import (
     PRIORITIES,
     PRIORITY_LABELS,
+    WHEN_KEYWORDS,
+    Change,
     Task,
+    TaskEdit,
     completed_last,
     deadline_state,
     group_today,
     plan_completion,
+    plan_edit,
     plan_move,
     plan_refresh,
+    required_priority,
     update_order,
 )
 
@@ -80,6 +90,10 @@ ALLOWED_HOSTS = {f"{SERVER_HOST}:{SERVER_PORT}", f"localhost:{SERVER_PORT}"}
 # add custom headers to requests sent here, so they cannot trigger writes.
 REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
+MAX_TITLE_CHARS = 1000
+MAX_NOTES_CHARS = 20000
+# Fields the edit view may change, all optional in a POST /api/edit "changes" object.
+EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
 
 
 class ApiError(Exception):
@@ -209,6 +223,20 @@ def load_task_for_write(task_id: object) -> Tuple[Task, str, str, List[str]]:
     return task, token, db_path, missing
 
 
+def refuse_date_change_on_repeating(task: Task, change: Change) -> None:
+    """Refuse a deadline or When change on a copy of a repeating to-do.
+
+    Things ignores such changes from its URL command, so the write could never
+    be confirmed and would look like a token problem.
+    """
+    if task.repeating and change.changes_dates:
+        raise ApiError(
+            409,
+            "This is a copy of a repeating to-do. Things doesn't let Do Things change its "
+            "deadline or When, which this change needs. Change it in Things.",
+        )
+
+
 def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     """Move a task to another priority, then save the new order once Things confirms."""
     priority, ids = parse_order(body)
@@ -218,7 +246,9 @@ def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     if priority in missing:
         # Things would silently drop the unknown tag, so the move could never be confirmed.
         raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
-    if not apply_change(plan_move(task, priority, today_local()), token, db_path):
+    change = plan_move(task, priority, today_local())
+    refuse_date_change_on_repeating(task, change)
+    if not apply_change(change, token, db_path):
         # Order is only recorded after Things confirms the move.
         return {"ok": False, "write_failed": True}
     save_order(update_order(load_order(), priority, ids))
@@ -238,6 +268,133 @@ def complete_task(body: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True}  # Already in the requested state.
     if not apply_change(plan_completion(task, completed), token, db_path):
         return {"ok": False, "write_failed": True}
+    return {"ok": True}
+
+
+def when_json(task: Task, today: date) -> Dict[str, Optional[str]]:
+    """Describe a task's When for the edit view: kind today/date/anytime/someday, plus the date."""
+    if task.someday:
+        return {"kind": "someday", "date": None}
+    if task.start_date is None:
+        return {"kind": "anytime", "date": None}
+    kind = "today" if task.start_date <= today else "date"
+    return {"kind": kind, "date": task.start_date.isoformat()}
+
+
+def task_detail(task_id: object) -> Dict[str, Any]:
+    """Return one task for the edit view, with the choices for its fields."""
+    if not is_valid_task_id(task_id):
+        raise ApiError(400, "Invalid task id.")
+    today = today_local()
+    with open_things_db(require_db_path()) as conn:
+        task = read_task(conn, task_id)
+        options = read_edit_options(conn)
+    if task is None:
+        raise ApiError(404, "Task not found in Things.")
+    detail = task_to_json(task, today)
+    detail.update(
+        notes=task.notes,
+        when=when_json(task, today),
+        priority=required_priority(task, today),
+        list_id=task.list_id,
+        heading_id=task.heading_id,
+        repeating=task.repeating,
+    )
+    return {"task": detail, "options": options}
+
+
+def _parse_date(value: object, field: str) -> date:
+    """Parse a YYYY-MM-DD string or raise an ApiError naming the field."""
+    message = f"{field} must be a date (YYYY-MM-DD)."
+    if not isinstance(value, str):
+        raise ApiError(400, message)
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise ApiError(400, message)
+
+
+def parse_edit(changes: object, task: Task, options: Dict[str, list], today: date) -> TaskEdit:
+    """Validate the edit view's changes and return them as a TaskEdit.
+
+    Everything is checked against Things' own data (existing tags, open
+    projects and areas, headings of the chosen project), so only values Things
+    can apply are sent.
+    """
+    if not isinstance(changes, dict) or not set(changes) <= EDIT_FIELDS:
+        raise ApiError(400, "Invalid changes.")
+    edit = TaskEdit()
+    if "title" in changes:
+        title = changes["title"]
+        if not isinstance(title, str) or not title.strip() or len(title) > MAX_TITLE_CHARS or "\n" in title:
+            raise ApiError(400, "The title must be one line of text and can't be empty.")
+        edit.title = title.strip()
+    if "notes" in changes:
+        if not isinstance(changes["notes"], str) or len(changes["notes"]) > MAX_NOTES_CHARS:
+            raise ApiError(400, "Notes are too long.")
+        edit.notes = changes["notes"]
+    if "when" in changes:
+        when = changes["when"]
+        if when == "today":
+            edit.when_date = today
+        elif when in WHEN_KEYWORDS:
+            edit.when_keyword = when
+        else:
+            edit.when_date = _parse_date(when, "When")
+    if "deadline" in changes:
+        if changes["deadline"] == "":
+            edit.clear_deadline = True
+        else:
+            edit.deadline = _parse_date(changes["deadline"], "Deadline")
+    if "priority" in changes:
+        if changes["priority"] not in PRIORITIES:
+            raise ApiError(400, "Unknown priority.")
+        edit.priority = changes["priority"]
+    if "tags" in changes:
+        tags = changes["tags"]
+        if not isinstance(tags, list) or not all(t in options["tags"] for t in tags):
+            raise ApiError(400, "Tags must be existing Things tags.")
+        if any("," in t for t in tags):
+            raise ApiError(400, "Tags containing a comma can't be set from Do Things.")
+        edit.other_tags = list(dict.fromkeys(tags))  # Drop duplicates, keep order.
+    list_ids = {a["id"] for a in options["areas"]} | {p["id"] for p in options["projects"]}
+    if "list_id" in changes:
+        if changes["list_id"] not in list_ids:
+            raise ApiError(400, "Unknown project or area.")
+        edit.list_id = changes["list_id"]
+    if "heading_id" in changes:
+        project = edit.list_id or task.list_id
+        headings = {h["id"] for h in options["headings"] if h["project"] == project}
+        if changes["heading_id"] not in headings:
+            raise ApiError(400, "That heading isn't in the chosen project.")
+        edit.heading_id = changes["heading_id"]
+    return edit
+
+
+def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply an edit-view save to Things as one confirmed update."""
+    task, token, db_path, missing = load_task_for_write(body.get("id"))
+    if task.completed:
+        raise ApiError(409, "Uncheck the task before editing it.")
+    today = today_local()
+    with open_things_db(db_path) as conn:
+        options = read_edit_options(conn)
+    change = plan_edit(task, parse_edit(body.get("changes"), task, options, today), today)
+    if change is None:
+        return {"ok": True}  # Nothing changed.
+    refuse_date_change_on_repeating(task, change)
+    blocked = [p for p in missing if change.tags is not None and p in change.tags]
+    if blocked:
+        # Things would silently drop the unknown tag, so the edit could never be confirmed.
+        raise ApiError(409, f"Create the {blocked[0]} tag in Things first (Window › Tags), then try again.")
+    if not apply_change(change, token, db_path):
+        return {"ok": False, "write_failed": True}
+    new_priority = body["changes"].get("priority")
+    if new_priority and new_priority != required_priority(task, today):
+        # Put the task at the end of its new group, as a drag to the bottom would.
+        order = load_order()
+        ids = [i for i in order.get(new_priority, []) if i != task.uuid] + [task.uuid]
+        save_order(update_order(order, new_priority, ids))
     return {"ok": True}
 
 
@@ -276,6 +433,7 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
 POST_ROUTES = {
     "/api/move": move_task,
     "/api/complete": complete_task,
+    "/api/edit": edit_task,
     "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,
@@ -298,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self) -> None:  # noqa: N802 (name required by http.server)
-        """Serve the page, the status, or a task list."""
+        """Serve the page, the status, a task list, or one task for editing."""
         if not self._host_allowed():
             return
         path, _, query = self.path.partition("?")
@@ -309,6 +467,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/list":
             name = urllib.parse.parse_qs(query).get("name", [""])[0]
             self._run(lambda: list_response(name))
+        elif path == "/api/task":
+            task_id = urllib.parse.parse_qs(query).get("id", [""])[0]
+            self._run(lambda: task_detail(task_id))
         else:
             self._send_json(404, {"error": "Not found."})
 

@@ -3,9 +3,13 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.6
+  Version: 0.1.7
 
   Change log:
+  - v0.1.7 (2026-11-07): Clicking a task expands it into an inline editor
+    (title, notes, tags, When, deadline, project/area and heading, priority)
+    with Save and Cancel; empty fields are added with buttons. Open in Things
+    moved into the editor.
   - v0.1.6 (2026-11-07): Checkbox on every task in Today and the searches.
     Checking completes the task in Things, shows it dim gray and struck
     through, and moves it to the bottom of its group; unchecking reopens it.
@@ -108,6 +112,36 @@
   .deadline { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
   .deadline.overdue { color: var(--red); }
   .deadline svg { width: 12px; height: 12px; }
+  /* Inline editor: the clicked task expands into a card, like Things. */
+  .editor {
+    background: var(--hover); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin: 6px 0 10px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .editor .head { display: flex; align-items: center; gap: 10px; }
+  .editor input, .editor select, .editor textarea {
+    font: inherit; color: var(--text); background: transparent; border: none; outline: none;
+  }
+  .editor .ed-title { flex: 1; font-size: 15px; }
+  .editor textarea {
+    resize: vertical; min-height: 44px; margin-left: 26px; color: var(--text);
+    border-left: 2px solid var(--line); padding-left: 8px;
+  }
+  .editor .ed-row { display: flex; align-items: center; gap: 8px; margin-left: 26px; font-size: 13px; flex-wrap: wrap; }
+  .editor .ed-row .label { color: var(--muted); min-width: 64px; }
+  .editor .ed-row select, .editor .ed-row input[type=date] {
+    border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; background: var(--bg);
+  }
+  .editor .ed-x { background: none; border: none; color: var(--muted); padding: 0 4px; cursor: pointer; }
+  .editor .chip { background: var(--pill); border-radius: 10px; padding: 1px 4px 1px 9px; font-size: 12px; }
+  .editor .seg button { padding: 2px 10px; border-radius: 0; background: var(--bg); color: var(--text); }
+  .editor .seg button:first-child { border-radius: 6px 0 0 6px; }
+  .editor .seg button:last-child { border-radius: 0 6px 6px 0; }
+  .editor .seg button.on { background: var(--accent); color: #fff; }
+  .editor .note { color: var(--muted); font-size: 12px; margin-left: 26px; }
+  .editor .foot { display: flex; align-items: center; gap: 8px; margin-left: 26px; }
+  .editor .adders { display: flex; gap: 4px; margin-left: auto; }
+  .editor .adders button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 2px 8px; font-size: 12px; }
+  .editor .ed-status { color: var(--red); font-size: 12px; margin-left: 26px; min-height: 0; }
   .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
   /* Setup screen */
   .setup p { color: var(--muted); }
@@ -168,6 +202,7 @@ const state = {
   busy: false,    // True while a move or reorder is being saved.
   drag: null,     // { id, from } while a task is being dragged.
   status: "",     // Message above the list; kept across redraws until replaced.
+  edit: null,     // The open inline editor (see startEdit), or null.
   version: "",
 };
 
@@ -222,7 +257,8 @@ function renderSidebar() {
       item.title = "Opens in Things";
       item.onclick = () => showThingsList(entry.id);
     } else {
-      item.onclick = () => { state.list = entry.id; state.view = "list"; setStatus(""); load(); };
+      // Switching lists closes an open editor without saving.
+      item.onclick = () => { state.list = entry.id; state.view = "list"; state.edit = null; setStatus(""); load(); };
     }
     nav.append(item);
   }
@@ -260,10 +296,11 @@ function taskRow(task, priority) {
     flag.append(task.deadline_label);
     row.append(flag);
   }
-  row.onclick = () => openTask(task.id);
+  row.onclick = () => startEdit(row, task.id);
   if (priority && !task.completed) {
     row.draggable = true;
     row.addEventListener("dragstart", (event) => {
+      if (state.edit) { event.preventDefault(); return; } // No dragging while editing.
       state.drag = { id: task.id, from: priority };
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", task.id);
@@ -430,6 +467,7 @@ async function dropTask(zone, clientY) {
  */
 async function toggleComplete(row, task) {
   if (state.busy) return;
+  if (state.edit) { editorMessage("Save or cancel the open task first."); return; }
   const completed = !task.completed;
   state.busy = true;
   row.classList.toggle("done", completed);
@@ -445,6 +483,291 @@ async function toggleComplete(row, task) {
     state.busy = false;
     load(); // Redraw from Things, in its confirmed state and order.
   }
+}
+
+// --- Inline editor ----------------------------------------------------------
+
+// Choices for When, in menu order.
+const WHEN_CHOICES = [["today", "Today"], ["date", "Date…"], ["anytime", "Anytime"], ["someday", "Someday"]];
+
+/**
+ * Expand a task row into the inline editor. `state.edit` holds the task as
+ * loaded (`task`), the edit-view choices (`options`), the edited copy
+ * (`draft`), which optional rows are shown (`shown`) and the card element.
+ * While it is open the list doesn't refresh and rows can't be dragged.
+ */
+async function startEdit(row, id) {
+  if (state.edit) { editorMessage("Save or cancel the open task first."); return; }
+  if (state.busy || state.drag) return;
+  state.busy = true;
+  try {
+    const { task, options } = await api(`/api/task?id=${encodeURIComponent(id)}`);
+    state.edit = {
+      task, options, card: row,
+      draft: {
+        title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
+        priority: task.priority, tags: [...task.tags], list_id: task.list_id, heading_id: task.heading_id,
+      },
+      // Empty fields start hidden and are added with the buttons at the bottom.
+      shown: {
+        tags: task.tags.length > 0, when: task.when.kind !== "anytime",
+        deadline: Boolean(task.deadline), list: Boolean(task.list_id),
+      },
+    };
+    redrawEditor();
+    state.edit.card.querySelector(".ed-title").focus();
+  } catch (error) {
+    setStatus(error.message);
+  } finally {
+    state.busy = false;
+  }
+}
+
+/** Replace the editor card (or the row it opened from) with a freshly built one. */
+function redrawEditor() {
+  const card = buildEditor();
+  state.edit.card.replaceWith(card);
+  state.edit.card = card;
+}
+
+/** Show a message inside the open editor. */
+function editorMessage(text) {
+  const line = state.edit && state.edit.card.querySelector(".ed-status");
+  if (line) line.textContent = text;
+}
+
+/** Build a labelled editor row. */
+function editorRow(label, ...children) {
+  const row = el("div", "ed-row");
+  row.append(el("span", "label", label), ...children);
+  return row;
+}
+
+/** Build a <select> from [value, label] pairs. */
+function selectOf(pairs, value) {
+  const select = el("select");
+  for (const [v, label] of pairs) {
+    const option = el("option", "", label);
+    option.value = v;
+    select.append(option);
+  }
+  select.value = value;
+  return select;
+}
+
+/** Build the editor card from state.edit. Structural changes rebuild it via redrawEditor. */
+function buildEditor() {
+  const { task, options, draft, shown } = state.edit;
+  const locked = task.completed;          // Completed tasks are shown read-only.
+  const datesLocked = locked || task.repeating; // Things won't change a repeating copy's dates.
+  const card = el("div", "editor");
+  card.dataset.id = task.id;
+  card.onkeydown = (event) => { if (event.key === "Escape") closeEditor(); };
+
+  // Title, with the checkbox shown for context.
+  const head = el("div", "head");
+  const check = el("span", "check");
+  check.innerHTML = TICK; // Static icon markup only.
+  if (task.completed) check.style.background = "var(--muted)";
+  const title = el("input", "ed-title");
+  title.value = draft.title;
+  title.placeholder = "New To-Do";
+  title.oninput = () => { draft.title = title.value; };
+  title.onkeydown = (event) => { if (event.key === "Enter") saveEditor(); };
+  head.append(check, title);
+  card.append(head);
+
+  const notes = el("textarea");
+  notes.value = draft.notes;
+  notes.placeholder = "Notes";
+  notes.rows = Math.min(10, Math.max(2, draft.notes.split("\n").length));
+  notes.oninput = () => { draft.notes = notes.value; };
+  card.append(notes);
+
+  if (shown.tags) {
+    const chips = draft.tags.map((tag) => {
+      const chip = el("span", "chip", tag);
+      const remove = el("button", "ed-x", "✕");
+      remove.type = "button";
+      remove.title = `Remove ${tag}`;
+      remove.onclick = () => { draft.tags = draft.tags.filter((t) => t !== tag); redrawEditor(); };
+      chip.append(remove);
+      return chip;
+    });
+    const available = options.tags.filter((t) => !draft.tags.includes(t));
+    const add = selectOf([["", "Add tag…"], ...available.map((t) => [t, t])], "");
+    add.onchange = () => { if (add.value) { draft.tags.push(add.value); redrawEditor(); } };
+    card.append(editorRow("Tags", ...chips, add));
+  }
+
+  if (shown.when) {
+    const kind = selectOf(WHEN_CHOICES, draft.when.kind);
+    kind.disabled = datesLocked;
+    kind.onchange = () => {
+      draft.when.kind = kind.value;
+      if (kind.value === "date" && !draft.when.date) draft.when.date = "";
+      redrawEditor();
+    };
+    const parts = [kind];
+    if (draft.when.kind === "date") {
+      const day = el("input");
+      day.type = "date";
+      day.value = draft.when.date || "";
+      day.disabled = datesLocked;
+      day.onchange = () => { draft.when.date = day.value; };
+      parts.push(day);
+    }
+    card.append(editorRow("★ When", ...parts));
+  }
+
+  if (shown.deadline) {
+    const day = el("input");
+    day.type = "date";
+    day.value = draft.deadline;
+    day.disabled = datesLocked;
+    day.onchange = () => { draft.deadline = day.value; };
+    const clear = el("button", "ed-x", "✕");
+    clear.type = "button";
+    clear.title = "Remove deadline";
+    clear.disabled = datesLocked;
+    clear.onclick = () => { draft.deadline = ""; shown.deadline = false; redrawEditor(); };
+    card.append(editorRow("⚑ Deadline", day, clear));
+  }
+
+  if (shown.list) {
+    const list = el("select");
+    if (!task.list_id) list.append(Object.assign(el("option", "", "None"), { value: "" }));
+    for (const [label, items] of [["Areas", options.areas], ["Projects", options.projects]]) {
+      const group = el("optgroup");
+      group.label = label;
+      for (const item of items) group.append(Object.assign(el("option", "", item.title), { value: item.id }));
+      if (items.length) list.append(group);
+    }
+    list.value = draft.list_id || "";
+    list.onchange = () => {
+      draft.list_id = list.value || null;
+      draft.heading_id = null; // A heading belongs to one project.
+      redrawEditor();
+    };
+    const parts = [list];
+    const headings = options.headings.filter((h) => h.project === draft.list_id);
+    if (headings.length) {
+      // "No heading" is only offered when it is already the case: Things' URL
+      // command can move a to-do under a heading, but not out from under one.
+      const keepsHeading = task.heading_id && draft.list_id === task.list_id;
+      const pairs = keepsHeading ? [] : [["", "No heading"]];
+      const heading = selectOf([...pairs, ...headings.map((h) => [h.id, h.title])], draft.heading_id || "");
+      heading.onchange = () => { draft.heading_id = heading.value || null; };
+      parts.push(heading);
+    }
+    card.append(editorRow("Project", ...parts));
+  }
+
+  const seg = el("span", "seg");
+  for (const p of ["P1", "P2", "P3"]) {
+    const button = el("button", p === draft.priority ? "on" : "", p);
+    button.type = "button";
+    button.disabled = locked;
+    button.onclick = () => { draft.priority = p; redrawEditor(); };
+    seg.append(button);
+  }
+  card.append(editorRow("Priority", seg));
+  if (draft.priority !== task.priority) {
+    card.append(el("div", "note",
+      "Moving into P1 sets the deadline to today; moving out of P1 removes it. A deadline you set here wins."));
+  }
+  if (task.repeating) {
+    card.append(el("div", "note", "Copy of a repeating to-do: change its When or deadline in Things."));
+  }
+  if (locked) {
+    card.append(el("div", "note", "Completed. Uncheck it to edit."));
+    for (const input of card.querySelectorAll("input, textarea, select, button")) input.disabled = true;
+  }
+
+  const foot = el("div", "foot");
+  const save = el("button", "", "Save");
+  save.type = "button";
+  save.disabled = locked;
+  save.onclick = saveEditor;
+  const cancel = el("button", "secondary", "Cancel");
+  cancel.type = "button";
+  cancel.onclick = closeEditor;
+  const things = el("button", "secondary", "Open in Things");
+  things.type = "button";
+  things.onclick = () => openTask(task.id);
+  foot.append(save, cancel, things);
+  if (!locked) {
+    const adders = el("span", "adders");
+    for (const [key, label, dateField] of [
+      ["tags", "+ Tags", false], ["when", "+ When", true], ["deadline", "+ Deadline", true], ["list", "+ Project", false],
+    ]) {
+      if (shown[key] || (dateField && task.repeating)) continue;
+      const add = el("button", "", label);
+      add.type = "button";
+      add.onclick = () => {
+        shown[key] = true;
+        if (key === "when") draft.when = { kind: "today", date: null };
+        redrawEditor();
+      };
+      adders.append(add);
+    }
+    foot.append(adders);
+  }
+  card.append(foot, el("div", "ed-status"));
+  return card;
+}
+
+/** Compare the draft with the task as loaded; return {changes} or {error}. */
+function editorChanges() {
+  const { task, draft } = state.edit;
+  const changes = {};
+  if (!draft.title.trim()) return { error: "The title can't be empty." };
+  if (draft.title.trim() !== task.title) changes.title = draft.title.trim();
+  if (draft.notes !== task.notes) changes.notes = draft.notes;
+  const when = draft.when;
+  if (when.kind !== task.when.kind || (when.kind === "date" && when.date !== task.when.date)) {
+    if (when.kind === "date" && !when.date) return { error: "Pick a date for When." };
+    changes.when = when.kind === "date" ? when.date : when.kind;
+  }
+  if (draft.deadline !== (task.deadline || "")) changes.deadline = draft.deadline;
+  if (draft.priority !== task.priority) changes.priority = draft.priority;
+  if ([...draft.tags].sort().join("\u001f") !== [...task.tags].sort().join("\u001f")) changes.tags = draft.tags;
+  if (draft.list_id && draft.list_id !== task.list_id) changes.list_id = draft.list_id;
+  if (draft.heading_id && draft.heading_id !== task.heading_id) changes.heading_id = draft.heading_id;
+  return { changes };
+}
+
+/** Send the edits to Things; close the editor once Things confirms them. */
+async function saveEditor() {
+  if (state.busy) return;
+  const { changes, error } = editorChanges();
+  if (error) { editorMessage(error); return; }
+  if (!Object.keys(changes).length) { closeEditor(); return; }
+  state.busy = true;
+  editorMessage("");
+  setStatus("Saving…");
+  try {
+    const result = await api("/api/edit", { id: state.edit.task.id, changes });
+    if (result.ok) {
+      setStatus("");
+      state.busy = false;
+      closeEditor();
+      return;
+    }
+    setStatus("");
+    editorMessage(writeFailedMessage("the changes"));
+  } catch (err) {
+    setStatus("");
+    editorMessage(err.message);
+  } finally {
+    state.busy = false;
+  }
+}
+
+/** Close the editor without saving and redraw the list. */
+function closeEditor() {
+  state.edit = null;
+  load();
 }
 
 /** Ask the server to open a task in Things for editing. */
@@ -512,9 +835,9 @@ function showSetup(firstRun) {
 
 // --- Loading -----------------------------------------------------------------
 
-/** Fetch and show the current list. Skipped while a save, drag or setup is in progress. */
+/** Fetch and show the current list. Skipped while saving, dragging, editing or in setup. */
 async function load() {
-  if (state.busy || state.drag || state.view === "setup") return;
+  if (state.busy || state.drag || state.edit || state.view === "setup") return;
   renderSidebar();
   try {
     const data = await api(`/api/list?name=${encodeURIComponent(state.list)}`);

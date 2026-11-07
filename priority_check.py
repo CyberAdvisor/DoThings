@@ -2,12 +2,18 @@
 
 Pure logic with no I/O, so every rule can be unit-tested without Things.
 It decides which priority tag (P1, P2, P3) a task should carry, what changes a
-manual move implies, what completing or reopening a task implies, and how
-tasks are grouped and ordered for display.
+manual move implies, what completing or reopening a task implies, what an
+edit from the edit view implies, and how tasks are grouped and ordered for
+display.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): Tasks carry notes, Someday state, list and heading.
+  `TaskEdit` and `plan_edit` turn an edit-view save into one Change (priority
+  uses the move rules; an explicit deadline or When wins). Change can also set
+  title, notes, When "anytime"/"someday", list and heading, and reports
+  `changes_dates`. Tasks flag copies of repeating to-dos (`repeating`).
 - v0.1.6 (2026-11-07): Tasks carry `completed_at`. `plan_completion` builds a
   complete/reopen change; `Change.tags` may be None (tags left alone). The
   refresh rules skip completed tasks, and completed tasks sort after open ones
@@ -42,6 +48,11 @@ class Task:
     deadline: Optional[date] = None
     context: str = ""  # Project or area title, shown under the task title.
     completed_at: Optional[float] = None  # Unix time it was completed; None while open.
+    notes: str = ""
+    someday: bool = False  # In Someday (no start date). False with no date means Anytime.
+    list_id: Optional[str] = None  # Project (directly or via its heading) or area id.
+    heading_id: Optional[str] = None
+    repeating: bool = False  # A copy of a repeating to-do: Things won't change its dates by URL.
 
     @property
     def completed(self) -> bool:
@@ -57,8 +68,9 @@ class Change:
     scheme replaces all tags), or None to leave the tags alone. Deadline
     handling is one of: leave alone, set to `set_deadline`, or clear when
     `clear_deadline` is true. When `set_start_date` is given, the task's start
-    date is set to it. When `set_completed` is given, the task is completed
-    (True) or reopened (False).
+    date is set to it; `set_when` ("anytime" or "someday") instead removes the
+    start date. When `set_completed` is given, the task is completed (True) or
+    reopened (False). The remaining `set_*` fields replace that value.
     """
 
     task_id: str
@@ -67,6 +79,19 @@ class Change:
     clear_deadline: bool = False
     set_start_date: Optional[date] = None
     set_completed: Optional[bool] = None
+    set_when: Optional[str] = None  # "anytime" or "someday"
+    set_title: Optional[str] = None
+    set_notes: Optional[str] = None
+    set_list_id: Optional[str] = None
+    set_heading_id: Optional[str] = None
+
+    @property
+    def changes_dates(self) -> bool:
+        """True if this change sets or clears the deadline or the When."""
+        return (
+            self.set_deadline is not None or self.clear_deadline
+            or self.set_start_date is not None or self.set_when is not None
+        )
 
     def is_satisfied_by(self, task: Task) -> bool:
         """Return True when `task` (re-read from Things) reflects this change."""
@@ -79,6 +104,18 @@ class Change:
         if self.clear_deadline and task.deadline is not None:
             return False
         if self.set_start_date is not None and task.start_date != self.set_start_date:
+            return False
+        if self.set_when is not None and (
+            task.start_date is not None or task.someday != (self.set_when == "someday")
+        ):
+            return False
+        if self.set_title is not None and task.title != self.set_title:
+            return False
+        if self.set_notes is not None and task.notes != self.set_notes:
+            return False
+        if self.set_list_id is not None and task.list_id != self.set_list_id:
+            return False
+        if self.set_heading_id is not None and task.heading_id != self.set_heading_id:
             return False
         return True
 
@@ -152,6 +189,65 @@ def plan_completion(task: Task, completed: bool) -> Change:
     Tags and dates are left alone, so a task reopens in the group it was in.
     """
     return Change(task_id=task.uuid, tags=None, set_completed=completed)
+
+
+# Values a TaskEdit's `when_keyword` may take (no start date).
+WHEN_KEYWORDS = ("anytime", "someday")
+
+
+@dataclass
+class TaskEdit:
+    """The fields changed in the edit view; None means unchanged.
+
+    For When, set `when_date` or `when_keyword` (not both). For the deadline,
+    set `deadline` or `clear_deadline`. `other_tags` is the complete list of
+    non-priority tags.
+    """
+
+    title: Optional[str] = None
+    notes: Optional[str] = None
+    when_date: Optional[date] = None
+    when_keyword: Optional[str] = None
+    deadline: Optional[date] = None
+    clear_deadline: bool = False
+    priority: Optional[str] = None
+    other_tags: Optional[List[str]] = None
+    list_id: Optional[str] = None
+    heading_id: Optional[str] = None
+
+
+def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
+    """Return the single Change for an edit-view save, or None if nothing changed.
+
+    A priority change applies the move rules (plan_move), then the explicit
+    fields are layered on top: a deadline or When chosen in the edit wins over
+    what the move rules would set.
+    """
+    if edit.when_keyword is not None and edit.when_keyword not in WHEN_KEYWORDS:
+        raise ValueError(f"Unknown When value: {edit.when_keyword!r}")
+    if edit.priority is not None and edit.priority != required_priority(task, today):
+        change = plan_move(task, edit.priority, today)
+    else:
+        change = Change(task_id=task.uuid, tags=None)
+    if edit.other_tags is not None:
+        # Keep the priority tags the move rules chose (or the task's own).
+        current = change.tags if change.tags is not None else task.tags
+        change.tags = list(edit.other_tags) + priority_tags(current)
+    if edit.deadline is not None:
+        change.set_deadline, change.clear_deadline = edit.deadline, False
+    elif edit.clear_deadline:
+        change.set_deadline, change.clear_deadline = None, True
+    if edit.when_date is not None:
+        change.set_start_date, change.set_when = edit.when_date, None
+    elif edit.when_keyword is not None:
+        change.set_start_date, change.set_when = None, edit.when_keyword
+    change.set_title = edit.title
+    change.set_notes = edit.notes
+    change.set_list_id = edit.list_id
+    change.set_heading_id = edit.heading_id
+    if change == Change(task_id=task.uuid, tags=None):
+        return None
+    return change
 
 
 def deadline_state(deadline: Optional[date], today: date) -> Optional[str]:

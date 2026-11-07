@@ -5,9 +5,11 @@ exist, whether the P1-P3 tags exist, and every Today task with its tags,
 dates, completion, required priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): Schema check also requires the `notes` and
+  `rt1_repeatingTemplate` columns used by the edit view.
 - v0.1.6 (2026-11-07): Today now includes tasks completed today; each is
   printed with `completed=`.
 - v0.1.5 (2026-11-07): Synchronized module version metadata.
@@ -35,6 +37,7 @@ REQUIRED_COLUMNS = {
     "TMTask": (
         "uuid", "title", "type", "status", "trashed", "start", "startDate", "deadline",
         "todayIndex", "index", "project", "heading", "area", "stopDate", "rt1_recurrenceRule",
+        "notes", "rt1_repeatingTemplate",
     ),
     "TMTag": ("uuid", "title"),
     "TMTaskTag": ("tasks", "tags"),

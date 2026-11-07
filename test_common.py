@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.6
+Version: 0.1.7
 
 Change log:
+- v0.1.7 (2026-11-07): Tests for the edit fields read from the database,
+  read_edit_options, and the new update URL parameters.
 - v0.1.6 (2026-11-07): Tests for tasks completed today appearing in the lists
   (and earlier or canceled ones not), and for complete/reopen URLs.
 - v0.1.5 (2026-11-07): Dropped tests for the lists that now open in Things;
@@ -19,6 +21,7 @@ Change log:
 - v0.1.0 (2026-11-07): Initial release.
 """
 
+import contextlib
 import os
 import sqlite3
 import stat
@@ -26,6 +29,7 @@ import tempfile
 import unittest
 import urllib.parse
 from datetime import date, datetime, timedelta
+from typing import Iterator
 
 from common import (
     LOCAL_TZ,
@@ -42,6 +46,7 @@ from common import (
     missing_priority_tags,
     open_things_db,
     pack_things_date,
+    read_edit_options,
     read_list,
     read_task,
     save_order,
@@ -53,6 +58,13 @@ from priority_check import Change
 
 TODAY = date(2026, 11, 7)
 
+
+@contextlib.contextmanager
+def write_db(path: str) -> Iterator[sqlite3.Connection]:
+    """Open the mock database for writing; commit and close it afterwards."""
+    with contextlib.closing(sqlite3.connect(path)) as conn, conn:
+        yield conn
+
 # Things values the mock data needs that common.py's queries don't use.
 START_INBOX = 0
 STATUS_CANCELED = 2
@@ -62,7 +74,7 @@ CREATE TABLE TMTask (
     uuid TEXT PRIMARY KEY, title TEXT, type INTEGER, status INTEGER, trashed INTEGER,
     start INTEGER, startDate INTEGER, deadline INTEGER, deadlineSuppressionDate INTEGER,
     todayIndex INTEGER, "index" INTEGER, project TEXT, heading TEXT, area TEXT,
-    stopDate REAL, rt1_recurrenceRule BLOB
+    stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT
 );
 CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
@@ -141,6 +153,17 @@ class UrlTests(unittest.TestCase):
                 params = self._params(build_update_url(Change("A1", None, set_completed=completed), "t"))
                 self.assertEqual(params["completed"], [value])
                 self.assertNotIn("tags", params)
+
+    def test_edit_fields_in_url(self) -> None:
+        change = Change("A1", None, set_title="New & title", set_notes="Line 1\nLine 2",
+                        set_when="someday", set_list_id="P9", set_heading_id="H9")
+        params = self._params(build_update_url(change, "t"))
+        self.assertEqual(params["title"], ["New & title"])
+        self.assertEqual(params["notes"], ["Line 1\nLine 2"])
+        self.assertEqual(params["when"], ["someday"])
+        self.assertEqual(params["list-id"], ["P9"])
+        self.assertEqual(params["heading-id"], ["H9"])
+        self.assertNotIn("tags", params)
 
     def test_update_leaves_deadline(self) -> None:
         params = self._params(build_update_url(Change("A1", ["P2"]), "t"))
@@ -264,7 +287,7 @@ class DatabaseTests(unittest.TestCase):
             ("done_yesterday", STATUS_COMPLETED, midnight - 60),
             ("canceled_today", STATUS_CANCELED, midnight + 60),
         ]
-        with sqlite3.connect(self.path) as conn:
+        with write_db(self.path) as conn:
             conn.executemany(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, deadline, "
                 f"stopDate, todayIndex, \"index\") VALUES (?, ?, 0, ?, 0, {START_ANYTIME}, ?, ?, ?, 9, 0)",
@@ -299,6 +322,34 @@ class DatabaseTests(unittest.TestCase):
         for name in ("today", "p1", "overdue"):
             with self.subTest(name=name):
                 self.assertFalse(hidden & set(self._ids(name)))
+
+    def test_edit_fields_read(self) -> None:
+        with write_db(self.path) as conn:
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, project, \"index\") "
+                f"VALUES ('head1', 'Heading', 2, {STATUS_OPEN}, 0, 'proj1', 0)"
+            )
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, notes, type, status, trashed, start, heading, "
+                f"rt1_repeatingTemplate, \"index\") VALUES ('undr', 'Under heading', 'Some notes', 0, "
+                f"{STATUS_OPEN}, 0, {START_SOMEDAY}, 'head1', 'tmpl', 0)"
+            )
+        with open_things_db(self.path) as conn:
+            task = read_task(conn, "undr")
+            self.assertEqual((task.notes, task.list_id, task.heading_id), ("Some notes", "proj1", "head1"))
+            self.assertTrue(task.someday)
+            self.assertTrue(task.repeating)
+            plain = read_task(conn, "today2")
+            self.assertEqual((plain.notes, plain.list_id, plain.heading_id), ("", "area1", None))
+            self.assertFalse(plain.someday or plain.repeating)
+            options = read_edit_options(conn)
+        self.assertEqual(options["tags"], ["Home, Office"])
+        self.assertEqual(options["areas"], [{"id": "area1", "title": "Work"}])
+        # Completed, canceled and trashed projects, and closed or trashed headings, are left out.
+        self.assertEqual([p["id"] for p in options["projects"]], ["proj1"])
+        self.assertIn({"id": "head1", "title": "Heading", "project": "proj1"}, options["headings"])
+        self.assertNotIn("trashhead", [h["id"] for h in options["headings"]])
+        self.assertNotIn("donehead", [h["id"] for h in options["headings"]])
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:
