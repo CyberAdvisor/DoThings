@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.9
+  Version: 0.1.10
 
   Change log:
+  - v0.1.10 (2026-11-07): Sidebar counts as in Things: Inbox items, and for
+    Today a red badge of tasks due today or overdue plus the open total. The
+    editor shows checklist progress next to Open in Things.
   - v0.1.9 (2026-11-07): Picking Someday or Anytime for When also removes the
     deadline (the Deadline row disappears; it can be added back before saving).
   - v0.1.8 (2026-11-07): When and Deadline open a date picker (calendar with
@@ -66,7 +69,13 @@
   .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
   .nav-gap { height: 14px; }
   .nav-heading { color: var(--muted); font-size: 12px; font-weight: 600; padding: 4px 10px; }
-  .nav-item .opens-things { margin-left: auto; color: var(--muted); }
+  .nav-item .extra { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .nav-item .count { color: var(--muted); font-size: 12px; }
+  .nav-item .badge {
+    background: var(--red); color: #fff; font-size: 11px; font-weight: 700;
+    border-radius: 9px; padding: 0 6px; min-width: 8px; text-align: center;
+  }
+  .nav-item .opens-things { color: var(--muted); }
   .nav-item .opens-things svg { width: 12px; height: 12px; }
   .nav-footer { margin-top: auto; padding: 8px 10px; color: var(--muted); font-size: 12px; }
   .nav-footer a { color: var(--muted); cursor: pointer; text-decoration: underline; }
@@ -166,6 +175,7 @@
   .picker .grid button:hover { background: var(--hover); }
   .picker .grid button.today { color: var(--accent); font-weight: 700; }
   .picker .grid button.chosen { background: var(--accent); color: #fff; }
+  .editor .checklist { color: var(--muted); font-size: 12px; }
   .editor .ed-status { color: var(--red); font-size: 12px; margin-left: 26px; min-height: 0; }
   .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
   /* Setup screen */
@@ -228,6 +238,7 @@ const state = {
   drag: null,     // { id, from } while a task is being dragged.
   status: "",     // Message above the list; kept across redraws until replaced.
   edit: null,     // The open inline editor (see startEdit), or null.
+  counts: null,   // Sidebar counts from the last list response: {inbox, today: {open, due}}.
   version: "",
 };
 
@@ -275,10 +286,13 @@ function renderSidebar() {
     const item = el("div", "nav-item" + (state.view === "list" && state.list === entry.id ? " selected" : ""));
     item.innerHTML = ICONS[entry.icon]; // Static icon markup only.
     item.append(el("span", "", entry.name));
+    const extra = el("span", "extra");
+    item.append(extra);
+    appendCounts(extra, entry.id);
     if (entry.things) {
       const mark = el("span", "opens-things");
       mark.innerHTML = OPENS_IN_THINGS; // Static icon markup only.
-      item.append(mark);
+      extra.append(mark);
       item.title = "Opens in Things";
       item.onclick = () => showThingsList(entry.id);
     } else {
@@ -292,6 +306,22 @@ function renderSidebar() {
   link.onclick = () => showSetup(false);
   footer.append(link, el("div", "", state.version ? `Do Things v${state.version}` : ""));
   nav.append(footer);
+}
+
+/**
+ * Add the counts Things shows beside a sidebar entry: the Inbox item count,
+ * and for Today a red badge of tasks due today or overdue plus the open total.
+ * Zero counts are not shown.
+ */
+function appendCounts(extra, id) {
+  const counts = state.counts;
+  if (!counts) return;
+  if (id === "today") {
+    if (counts.today.due) extra.append(el("span", "badge", String(counts.today.due)));
+    if (counts.today.open) extra.append(el("span", "count", String(counts.today.open)));
+  } else if (id === "inbox" && counts.inbox) {
+    extra.append(el("span", "count", String(counts.inbox)));
+  }
 }
 
 // --- Task lists --------------------------------------------------------------
@@ -703,6 +733,13 @@ function buildEditor() {
   things.type = "button";
   things.onclick = () => openTask(task.id);
   foot.append(save, cancel, things);
+  if (task.checklist.total) {
+    // The checklist is edited in Things (replacing it from here would reset ticks).
+    const checklist = el("span", "checklist",
+      `☑ Checklist: ${task.checklist.done} of ${task.checklist.total} done`);
+    checklist.title = "Edit the checklist in Things";
+    foot.append(checklist);
+  }
   if (!locked) {
     const adders = el("span", "adders");
     for (const [key, label] of [["tags", "+ Tags"], ["when", "+ When"], ["deadline", "+ Deadline"], ["list", "+ Project"]]) {
@@ -967,6 +1004,8 @@ async function load() {
   try {
     const data = await api(`/api/list?name=${encodeURIComponent(state.list)}`);
     if (!data.token_set) { showSetup(true); return; }
+    state.counts = data.counts;
+    renderSidebar(); // Again, now with the fresh counts.
     renderList(data);
   } catch (error) {
     const content = document.getElementById("content");

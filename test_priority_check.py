@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): Test for today_counts.
 - v0.1.9 (2026-11-07): Tests for the start-date refresh rule and for Someday
   and Anytime clearing the deadline.
 - v0.1.8 (2026-11-07): Removed the Change.changes_dates test with the property.
@@ -35,6 +36,7 @@ from priority_check import (
     plan_move,
     plan_refresh,
     required_priority,
+    today_counts,
     update_order,
 )
 
@@ -123,6 +125,21 @@ class StartDateRuleTests(unittest.TestCase):
         for name, task in cases.items():
             with self.subTest(name):
                 self.assertIsNone(plan_refresh(task, TODAY))
+
+
+class TodayCountsTests(unittest.TestCase):
+    """Sidebar counts for Today."""
+
+    def test_open_and_due(self) -> None:
+        tasks = [
+            make_task("overdue", deadline=YESTERDAY),
+            make_task("due", deadline=TODAY),
+            make_task("later", deadline=TOMORROW),
+            make_task("plain"),
+            make_task("done_due", deadline=TODAY, completed_at=1.0),
+        ]
+        self.assertEqual(today_counts(tasks, TODAY), {"open": 4, "due": 2})
+        self.assertEqual(today_counts([], TODAY), {"open": 0, "due": 0})
 
 
 class CompletionTests(unittest.TestCase):

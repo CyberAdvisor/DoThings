@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): Tests for sidebar counts in list responses and
+  checklist progress in the task detail.
 - v0.1.9 (2026-11-07): Test that a refresh gives an undated task due today a
   start date of today.
 - v0.1.8 (2026-11-07): Removed the repeating-copy refusal test (no longer
@@ -127,6 +129,21 @@ class StartDateRefreshTests(MockThingsTestCase):
             self.assertIsNone(change.tags)
 
 
+class CountsTests(MockThingsTestCase):
+    """Every list response carries the sidebar counts."""
+
+    def test_counts_on_today_and_on_a_search(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, \"index\") "
+                "VALUES ('in1', 'Inbox item', 0, 0, 0, 0, 0)"
+            )
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'", (pack_things_date(TODAY),))
+        expected = {"inbox": 1, "today": {"open": 1, "due": 1}}
+        self.assertEqual(serve.list_response("today")["counts"], expected)
+        self.assertEqual(serve.list_response("overdue")["counts"], expected)
+
+
 class CompletionTests(MockThingsTestCase):
     """Completing and reopening tasks, and how completed tasks are listed."""
 
@@ -220,6 +237,12 @@ class EditTests(MockThingsTestCase):
         self.assertEqual([p["id"] for p in detail["options"]["projects"]], ["proj1"])
         with self.assertRaises(serve.ApiError):
             serve.task_detail("nosuch")
+
+    def test_detail_checklist(self) -> None:
+        self.assertEqual(serve.task_detail("task1")["task"]["checklist"], {"done": 0, "total": 0})
+        with write_db(self.db_path) as conn:
+            conn.executemany("INSERT INTO TMChecklistItem VALUES (?, 'x', ?, 'task1', 0)", [("c1", 0), ("c2", 3)])
+        self.assertEqual(serve.task_detail("task1")["task"]["checklist"], {"done": 1, "total": 2})
 
     def test_saves_fields_as_one_change(self) -> None:
         self.assertEqual(

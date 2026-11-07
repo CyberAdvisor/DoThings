@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): Tests for count_inbox and read_checklist_progress.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.
 - v0.1.8 (2026-11-07): Dropped the repeating-copy column and checks.
 - v0.1.7 (2026-11-07): Tests for the edit fields read from the database,
@@ -36,18 +37,21 @@ from typing import Iterator
 from common import (
     LOCAL_TZ,
     START_ANYTIME,
+    START_INBOX,
     START_SOMEDAY,
     STATUS_COMPLETED,
     STATUS_OPEN,
     THINGS_LISTS,
     build_show_url,
     build_update_url,
+    count_inbox,
     is_valid_task_id,
     load_order,
     load_token,
     missing_priority_tags,
     open_things_db,
     pack_things_date,
+    read_checklist_progress,
     read_edit_options,
     read_list,
     read_task,
@@ -68,7 +72,6 @@ def write_db(path: str) -> Iterator[sqlite3.Connection]:
         yield conn
 
 # Things values the mock data needs that common.py's queries don't use.
-START_INBOX = 0
 STATUS_CANCELED = 2
 
 SCHEMA = """
@@ -81,6 +84,7 @@ CREATE TABLE TMTask (
 CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTaskTag (tasks TEXT, tags TEXT);
+CREATE TABLE TMChecklistItem (uuid TEXT PRIMARY KEY, title TEXT, status INTEGER, task TEXT, "index" INTEGER);
 """
 
 
@@ -351,6 +355,29 @@ class DatabaseTests(unittest.TestCase):
         self.assertIn({"id": "head1", "title": "Heading", "project": "proj1"}, options["headings"])
         self.assertNotIn("trashhead", [h["id"] for h in options["headings"]])
         self.assertNotIn("donehead", [h["id"] for h in options["headings"]])
+
+    def test_count_inbox(self) -> None:
+        with open_things_db(self.path) as conn:
+            self.assertEqual(count_inbox(conn), 1)  # The open, untrashed "inbox" task.
+        with write_db(self.path) as conn:
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, \"index\") "
+                f"VALUES (?, ?, 0, ?, ?, {START_INBOX}, 0)",
+                [("in2", "Open", STATUS_OPEN, 0), ("in3", "Done", STATUS_COMPLETED, 0),
+                 ("in4", "Trashed", STATUS_OPEN, 1)],
+            )
+        with open_things_db(self.path) as conn:
+            self.assertEqual(count_inbox(conn), 2)
+
+    def test_checklist_progress(self) -> None:
+        with write_db(self.path) as conn:
+            conn.executemany(
+                "INSERT INTO TMChecklistItem VALUES (?, ?, ?, 'today1', 0)",
+                [("c1", "One", STATUS_OPEN), ("c2", "Two", STATUS_COMPLETED), ("c3", "Three", STATUS_CANCELED)],
+            )
+        with open_things_db(self.path) as conn:
+            self.assertEqual(read_checklist_progress(conn, "today1"), {"done": 2, "total": 3})
+            self.assertEqual(read_checklist_progress(conn, "today2"), {"done": 0, "total": 0})
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:

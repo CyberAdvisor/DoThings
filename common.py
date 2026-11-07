@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): count_inbox for the sidebar; read_checklist_progress
+  for the editor's checklist indicator.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.
 - v0.1.8 (2026-11-07): No longer reads whether a task is a copy of a
   repeating to-do; nothing uses it now.
@@ -79,7 +81,7 @@ TASK_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 # Things TMTask column values used by the queries (full list in CLAUDE_CONTEXT.md).
 TYPE_TODO, TYPE_PROJECT, TYPE_HEADING = 0, 1, 2
 STATUS_OPEN, STATUS_COMPLETED = 0, 3
-START_ANYTIME, START_SOMEDAY = 1, 2
+START_INBOX, START_ANYTIME, START_SOMEDAY = 0, 1, 2
 
 # Lists Do Things shows itself: Today, then the custom searches.
 APP_LISTS = ("today", "p1", "p2", "p3", "overdue")
@@ -298,6 +300,27 @@ def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:
         )
     ]
     return {"tags": tags, "areas": areas, "projects": projects, "headings": headings}
+
+
+def count_inbox(conn: sqlite3.Connection) -> int:
+    """Return the number of open, untrashed to-dos in Things' Inbox."""
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM TMTask WHERE type = {TYPE_TODO} AND status = {STATUS_OPEN} "
+        f"AND trashed = 0 AND start = {START_INBOX} AND rt1_recurrenceRule IS NULL"
+    ).fetchone()
+    return row[0]
+
+
+def read_checklist_progress(conn: sqlite3.Connection, task_id: str) -> Dict[str, int]:
+    """Return {"done", "total"} for a task's checklist (both 0 if it has none).
+
+    Completed and canceled checklist items both count as done, as in Things.
+    """
+    row = conn.execute(
+        f"SELECT COUNT(*), COALESCE(SUM(status != {STATUS_OPEN}), 0) FROM TMChecklistItem WHERE task = ?",
+        [task_id],
+    ).fetchone()
+    return {"done": row[1], "total": row[0]}
 
 
 def missing_priority_tags(conn: sqlite3.Connection) -> List[str]:

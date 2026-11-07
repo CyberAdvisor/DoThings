@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): List responses include sidebar counts (Inbox; Today
+  open and due/overdue). The task detail includes checklist progress.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.
 - v0.1.8 (2026-11-07): Copies of repeating to-dos are no longer refused date
   changes (tested: Things applies them). /api/task also returns today's date
@@ -54,6 +56,7 @@ from common import (
     THINGS_LISTS,
     apply_change,
     build_show_url,
+    count_inbox,
     find_things_db_path,
     get_logger,
     is_valid_task_id,
@@ -62,6 +65,7 @@ from common import (
     missing_priority_tags,
     open_things_db,
     open_things_url,
+    read_checklist_progress,
     read_edit_options,
     read_list,
     read_task,
@@ -83,6 +87,7 @@ from priority_check import (
     plan_move,
     plan_refresh,
     required_priority,
+    today_counts,
     update_order,
 )
 
@@ -164,7 +169,10 @@ def apply_refresh_rules(
 
 
 def list_response(name: str) -> Dict[str, Any]:
-    """Build the JSON for Today or a search, applying the refresh rules first."""
+    """Build the JSON for Today or a search, applying the refresh rules first.
+
+    Every response also carries the sidebar counts, so they stay current.
+    """
     if name not in APP_LISTS:
         raise ApiError(404, f"Unknown list: {name}")
     db_path = require_db_path()
@@ -175,11 +183,14 @@ def list_response(name: str) -> Dict[str, Any]:
     write_failed = apply_refresh_rules(db_path, token, today, missing)
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, name, today)
+        today_tasks = tasks if name == "today" else read_list(conn, "today", today)
+        counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
     response: Dict[str, Any] = {
         "name": name,
         "token_set": token is not None,
         "write_failed": write_failed,
         "missing_tags": missing,
+        "counts": counts,
     }
     if name == "today":
         groups = group_today(tasks, load_order(), today)
@@ -276,6 +287,7 @@ def task_detail(task_id: object) -> Dict[str, Any]:
     with open_things_db(require_db_path()) as conn:
         task = read_task(conn, task_id)
         options = read_edit_options(conn)
+        checklist = read_checklist_progress(conn, task_id)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
     detail = task_to_json(task, today)
@@ -285,6 +297,7 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         priority=required_priority(task, today),
         list_id=task.list_id,
         heading_id=task.heading_id,
+        checklist=checklist,
     )
     return {"task": detail, "options": options, "today": today.isoformat()}
 

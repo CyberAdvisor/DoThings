@@ -5,9 +5,10 @@ exist, whether the P1-P3 tags exist, and every Today task with its tags,
 dates, completion, required priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): Schema check also requires TMChecklistItem (task, status).
 - v0.1.9 (2026-11-07): The planned change also shows a start date being set.
 - v0.1.8 (2026-11-07): Schema check no longer requires `rt1_repeatingTemplate`.
 - v0.1.7 (2026-11-07): Schema check also requires the `notes` and
@@ -44,6 +45,7 @@ REQUIRED_COLUMNS = {
     "TMTag": ("uuid", "title"),
     "TMTaskTag": ("tasks", "tags"),
     "TMArea": ("uuid", "title"),
+    "TMChecklistItem": ("task", "status"),
 }
 
 

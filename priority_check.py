@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.9
+Version: 0.1.10
 
 Change log:
+- v0.1.10 (2026-11-07): `today_counts` gives the sidebar's Today counts.
 - v0.1.9 (2026-11-07): New refresh rule: a task with no start date (Inbox,
   Anytime or Someday) due today or overdue gets a start date of today.
   Choosing Someday or Anytime in an edit also clears the deadline, unless the
@@ -273,6 +274,16 @@ def apply_order(tasks: List[Task], ids: List[str]) -> List[Task]:
     position = {task_id: i for i, task_id in enumerate(ids)}
     # Python's sort is stable, so tasks with no saved position keep Things' order.
     return sorted(tasks, key=lambda t: position.get(t.uuid, len(position)))
+
+
+def today_counts(tasks: Iterable[Task], today: date) -> Dict[str, int]:
+    """Count open Today tasks for the sidebar, as Things does.
+
+    `open`: all open tasks. `due`: open tasks due today or overdue (the red badge).
+    """
+    open_tasks = [t for t in tasks if not t.completed]
+    due = [t for t in open_tasks if t.deadline is not None and t.deadline <= today]
+    return {"open": len(open_tasks), "due": len(due)}
 
 
 def completed_last(tasks: List[Task]) -> List[Task]:
