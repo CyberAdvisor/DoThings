@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.27
+Version: 0.1.28
 
 Change log:
+- v0.1.28 (2026-11-07): Rows of tasks a sequential project started carry
+  `sequence` ("task 2 of 5"), in lists and the edit preview.
 - v0.1.27 (2026-11-07): POST /api/edit/preview shows an edit's result without
   writing; an unconfirmed refresh write pauses automatic updates until Retry
   (POST /api/refresh/retry) or a new token; the saved order forgets tasks no
@@ -94,6 +96,7 @@ from common import (
     THINGS_LISTS,
     apply_change,
     build_show_url,
+    count_completed,
     count_inbox,
     find_things_db_path,
     get_logger,
@@ -176,17 +179,22 @@ class ApiError(Exception):
         self.message = message
 
 
-def task_to_json(task: Task, today: date, show_priority_tags: bool = True) -> Dict[str, Any]:
+def task_to_json(
+    task: Task, today: date, show_priority_tags: bool = True, sequence: Optional[str] = None
+) -> Dict[str, Any]:
     """Convert a Task into the JSON shape the page renders, mirroring a Things row.
 
     Without `show_priority_tags` the P tags are left out: in Today's groups
     and the P1-P3 searches the priority is already shown by the list itself.
+    `sequence` ("task 2 of 5") marks a task a sequential project started; the
+    page shows it after the project name.
     """
     tags = task.tags if show_priority_tags else [t for t in task.tags if t not in PRIORITIES]
     return {
         "id": task.uuid,
         "title": task.title,
         "context": task.context,
+        "sequence": sequence,
         "tags": tags,
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "deadline_label": deadline_label(task.deadline, today),
@@ -313,6 +321,24 @@ def save_and_fail(kept: Dict[str, Pull], pulls: Dict[str, Pull]) -> bool:
     return True
 
 
+def sequence_labels(conn: sqlite3.Connection) -> Dict[str, str]:
+    """Return {task id: "task N of M"} for each task a sequential project started.
+
+    Only tasks still open with the start date Do Things gave them count
+    (find_pulled). N is the project's completed to-dos plus one, M the
+    completed plus the open ones.
+    """
+    projects = read_sequential_projects(conn)
+    done = count_completed(conn, projects)
+    labels = {}
+    for project, record in load_pulls().items():
+        tasks = projects.get(project, [])
+        if find_pulled(tasks, record.task, record.started_on) is not None:
+            finished = done.get(project, 0)
+            labels[record.task] = f"task {finished + 1} of {finished + len(tasks)}"
+    return labels
+
+
 def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:
     """Read Today as Do Things shows it: tasks of the same project in the project's manual order."""
     return in_project_order(read_list(conn, "today", today))
@@ -338,6 +364,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         today_tasks = read_today(conn, today)
         tasks = today_tasks if name == "today" else read_list(conn, name, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
+        labels = sequence_labels(conn)
     order = load_order()
     kept = prune_order(order, [t.uuid for t in today_tasks])  # Forget tasks that left Today.
     if kept != {p: order.get(p, []) for p in PRIORITIES}:
@@ -357,14 +384,20 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
             {
                 "priority": p,
                 "label": PRIORITY_LABELS[p],
-                "tasks": [task_to_json(t, today, show_priority_tags=False) for t in groups[p]],
+                "tasks": [
+                    task_to_json(t, today, show_priority_tags=False, sequence=labels.get(t.uuid))
+                    for t in groups[p]
+                ],
             }
             for p in PRIORITIES
         ]
     else:
         # Only Overdue mixes priorities, so only it shows the P tags.
         shown = name in PRIORITY_TAG_LISTS
-        response["tasks"] = [task_to_json(t, today, show_priority_tags=shown) for t in completed_last(tasks)]
+        response["tasks"] = [
+            task_to_json(t, today, show_priority_tags=shown, sequence=labels.get(t.uuid))
+            for t in completed_last(tasks)
+        ]
     return response
 
 
@@ -571,11 +604,16 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
     if change is not None and change.set_list_id is not None:
         titles = {item["id"]: item["title"] for item in options["areas"] + options["projects"]}
         after = replace(after, context=titles[change.set_list_id])
+    sequence = None
+    if after.start_date == task.start_date and after.list_id == task.list_id:
+        # Still the started task of its sequential project (changing its date ends that).
+        with open_things_db(db_path) as conn:
+            sequence = sequence_labels(conn).get(task.uuid)
     return {
         "when": when_json(after, today),
         "deadline": after.deadline.isoformat() if after.deadline else None,
         "priority": required_priority(after, today),
-        "row": task_to_json(after, today, show_priority_tags=name in PRIORITY_TAG_LISTS),
+        "row": task_to_json(after, today, show_priority_tags=name in PRIORITY_TAG_LISTS, sequence=sequence),
         "place": place_in_list(after, name, today),
     }
 

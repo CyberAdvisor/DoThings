@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.27
+  Version: 0.1.28
 
   Change log:
+  - v0.1.28 (2026-11-07): A task a sequential project started shows its place
+    after the project name, e.g. "Seq Project · task 2 of 5".
   - v0.1.27 (2026-11-07): The editor shows the server's preview of each date or
     priority choice (/api/edit/preview) instead of applying the rules itself,
     and Save puts the predicted row in place at once (or removes it if it
@@ -468,7 +470,9 @@ function taskRow(task, priority) {
   }
   for (const tag of task.tags) line.append(el("span", "pill", tag));
   body.append(line);
-  if (task.context) body.append(el("div", "context", task.context));
+  // A task a sequential project started shows its place, e.g. "Seq Project · task 2 of 5".
+  const context = [task.context, task.sequence].filter(Boolean).join(" · ");
+  if (context) body.append(el("div", "context", context));
   row.append(body);
   if (task.deadline_label) {
     // Red when today or overdue, gray when later, as in Things.

@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.27
+Version: 0.1.28
 
 Change log:
+- v0.1.28 (2026-11-07): Synchronized module version metadata.
 - v0.1.27 (2026-11-07): in_today, predict (an edit's result after the refresh
   rules), place_in_list and prune_order.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.

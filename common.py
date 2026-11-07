@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.27
+Version: 0.1.28
 
 Change log:
+- v0.1.28 (2026-11-07): count_completed (completed to-dos per project),
+  sharing its query with read_last_completed.
 - v0.1.27 (2026-11-07): errors.log is capped at 1 MB (RotatingFileHandler, one
   older copy).
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
@@ -69,6 +71,7 @@ import sqlite3
 import subprocess
 import time
 import urllib.parse
+from collections import Counter
 from datetime import date, datetime
 from typing import Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -349,20 +352,33 @@ def read_sequential_projects(conn: sqlite3.Connection) -> Dict[str, List[Task]]:
     return projects
 
 
-def read_last_completed(conn: sqlite3.Connection, project_ids: Iterable[str]) -> Dict[str, str]:
-    """Return {project id: its most recently completed to-do} (directly or under a heading)."""
+def _completed_in_projects(conn: sqlite3.Connection, project_ids: Iterable[str]) -> List[sqlite3.Row]:
+    """Return (uuid, project_id) of the completed, untrashed to-dos of the projects, oldest first.
+
+    To-dos directly in a project and under its headings both count.
+    """
     ids = sorted(set(project_ids))
     if not ids:
-        return {}
+        return []
     placeholders = ", ".join("?" for _ in ids)
-    rows = conn.execute(
+    return conn.execute(
         "SELECT t.uuid, COALESCE(t.project, h.project) AS project_id FROM TMTask t "
         "LEFT JOIN TMTask h ON h.uuid = t.heading "
         f"WHERE t.type = {TYPE_TODO} AND t.status = {STATUS_COMPLETED} AND t.trashed = 0 "
         f"AND COALESCE(t.project, h.project) IN ({placeholders}) ORDER BY t.stopDate",
         ids,
-    )
-    return {row["project_id"]: row["uuid"] for row in rows}  # Later rows (newer) overwrite.
+    ).fetchall()
+
+
+def read_last_completed(conn: sqlite3.Connection, project_ids: Iterable[str]) -> Dict[str, str]:
+    """Return {project id: its most recently completed to-do} (directly or under a heading)."""
+    # Rows are oldest first, so later (newer) ones overwrite.
+    return {row["project_id"]: row["uuid"] for row in _completed_in_projects(conn, project_ids)}
+
+
+def count_completed(conn: sqlite3.Connection, project_ids: Iterable[str]) -> Dict[str, int]:
+    """Return {project id: number of completed to-dos} (directly or under a heading); 0s left out."""
+    return dict(Counter(row["project_id"] for row in _completed_in_projects(conn, project_ids)))
 
 
 def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:

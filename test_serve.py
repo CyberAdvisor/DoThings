@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.27
+Version: 0.1.28
 
 Change log:
+- v0.1.28 (2026-11-07): Test that a started sequential task shows its place,
+  and loses it when its date changes.
 - v0.1.27 (2026-11-07): Tests for the edit preview, the refresh pause and
   Retry, and pruning the saved order.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
@@ -321,6 +323,22 @@ class ProjectTests(MockThingsTestCase):
         serve.list_response("today")
         self.assertIn(("s2", "start"), self.sent())
         self.assertEqual(load_pulls(self.pulls_path), {"seq": Pull("s2", TODAY, "s1")})
+
+    def test_started_task_shows_its_place(self) -> None:
+        serve.list_response("today")
+        self.start("s1")
+        rows = {t["id"]: t for g in serve.list_response("today")["groups"] for t in g["tasks"]}
+        self.assertEqual((rows["s1"]["sequence"], rows["p1"]["sequence"]), ("task 1 of 3", None))
+        self.set_status("s1", 3, stop=100)
+        serve.list_response("today")
+        self.start("s2")
+        rows = {t["id"]: t for g in serve.list_response("today")["groups"] for t in g["tasks"]}
+        self.assertEqual(rows["s2"]["sequence"], "task 2 of 3")
+        preview = serve.preview_edit({"id": "s2", "list": "today", "changes": {"title": "Renamed"}})
+        self.assertEqual(preview["row"]["sequence"], "task 2 of 3")
+        tomorrow = (TODAY + timedelta(days=1)).isoformat()
+        preview = serve.preview_edit({"id": "s2", "list": "today", "changes": {"when": tomorrow}})
+        self.assertIsNone(preview["row"]["sequence"])
 
     def test_old_record_without_trigger_is_never_undone(self) -> None:
         save_pulls({"seq": Pull("s2", TODAY)}, self.pulls_path)  # As written by v0.1.17.

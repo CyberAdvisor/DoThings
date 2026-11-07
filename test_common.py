@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.27
+Version: 0.1.28
 
 Change log:
+- v0.1.28 (2026-11-07): Test for count_completed.
 - v0.1.27 (2026-11-07): Test that errors.log is capped.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
 - v0.1.25 (2026-11-07): Synchronized module version metadata.
@@ -66,6 +67,7 @@ from common import (
     THINGS_LISTS,
     build_show_url,
     build_update_url,
+    count_completed,
     count_inbox,
     get_logger,
     is_valid_task_id,
@@ -484,6 +486,8 @@ class DatabaseTests(unittest.TestCase):
             # The most recent completion, including under a heading.
             self.assertEqual(read_last_completed(conn, ["seq"]), {"seq": "s_b"})
             self.assertEqual(read_last_completed(conn, []), {})
+            self.assertEqual(count_completed(conn, ["seq"]), {"seq": 2})
+            self.assertEqual(count_completed(conn, ["proj1"]), {})
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:
