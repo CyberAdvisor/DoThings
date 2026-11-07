@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.12
+Version: 0.1.13
 
 Change log:
+- v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): Counts test uses `not_due`.
 - v0.1.11 (2026-11-07): Test for hiding completed tasks.
 - v0.1.10 (2026-11-07): Tests for sidebar counts in list responses and

@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.13 (2026-11-07):** Moving, reordering, checking off and saving edits now show on the page immediately; Things confirms them in the background (the task is dimmed until it does). If Things doesn't apply a change, the list goes back to Things' real state and shows what to check. The editor's When line has a **Tomorrow** button that defers the start to tomorrow without changing the deadline.
 - **v0.1.12 (2026-11-07):** Today's gray count now shows only the tasks that aren't due, as in Things (the red badge counts the due ones). The Hide Completed checkbox is the same round circle as the task checkboxes.
 - **v0.1.11 (2026-11-07):** A **Hide Completed** checkbox under the searches hides tasks checked off today in every view; unchecking it shows them again. The setting is remembered in your browser.
 - **v0.1.10 (2026-11-07):** The sidebar shows counts like Things: the number of Inbox items, and for Today a red badge of tasks due today or overdue plus the total open. The editor shows a task's checklist progress (e.g. "Checklist: 1 of 3 done") next to Open in Things.
@@ -35,7 +36,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`.
 - Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day (tick **Hide Completed** under the searches to hide these everywhere; the setting is remembered). Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
-- Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar; choosing Someday or Anytime also removes the deadline), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things; if the task has a checklist, its progress is shown beside it (edit the checklist in Things). While a card is open, the list doesn't refresh and tasks can't be dragged.
+- Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar; choosing Someday or Anytime also removes the deadline; **Tomorrow** on the When line defers the start to tomorrow and leaves the deadline alone), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things; if the task has a checklist, its progress is shown beside it (edit the checklist in Things). While a card is open, the list doesn't refresh and tasks can't be dragged.
 - The sidebar shows Today and the searches P1, P2, P3 and Overdue in Do Things. Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open that list in Things. As in Things, Inbox shows its item count and Today shows a red badge of tasks due today or overdue followed by the number of other open tasks.
 - If the P1, P2 or P3 tag doesn't exist in Things, Do Things changes no tags and shows how to create them.
 
@@ -124,7 +125,7 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 - Only to-dos are shown, not projects or headings.
 - Today membership is worked out from start dates and deadlines. It may differ slightly from Things in edge cases, such as tasks inside a project that is itself scheduled later.
 - The custom searches are fixed (P1, P2, P3, Overdue). New ones are added in code.
-- Each change waits up to 5 seconds for Things to confirm it, so moves take a moment.
+- Changes show immediately but are confirmed with Things in the background, one at a time; while one is pending, that task can't be dragged or opened, and a change Things doesn't apply within 5 seconds is undone on the page.
 - The editor can't delete a task, edit its checklist, change repeat settings or attachments, or take a task out of a project, area or heading. Use **Open in Things** for those.
 
 ## Customizing this with Claude

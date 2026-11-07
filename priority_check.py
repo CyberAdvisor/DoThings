@@ -6,9 +6,10 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.12
+Version: 0.1.13
 
 Change log:
+- v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): today_counts returns `not_due` (open tasks that are
   not due) instead of all open tasks, matching Things' sidebar.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.

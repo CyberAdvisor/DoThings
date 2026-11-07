@@ -65,6 +65,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 
 ## Architecture notes
 - A browser that disconnects mid-request raises `ConnectionError` while the reply is sent. `Handler.handle` ignores it, and `_run` sends the reply outside its `try` so it isn't logged as a Things read error.
+- The page updates optimistically: drags, reorders, check-offs and edit saves change the DOM first, then `enqueue` sends the request. Requests run one at a time in order (`saveQueue`); rows are dimmed (`.saving`) and not draggable until confirmed, opening the editor waits for pending changes, and the list isn't refreshed until the queue is empty. Then `load()` redraws from Things, which undoes anything Things didn't apply.
 - `HTTPServer` is single-threaded on purpose, so writes to Things and to the order file never overlap.
 - Starting `serve.py` when port 8765 is already in use just opens the page and exits. The Shortcut relies on this.
 - Request checks: the Host header must be `127.0.0.1:8765` or `localhost:8765`, and POSTs need `X-Do-Things: 1`.

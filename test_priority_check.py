@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.12
+Version: 0.1.13
 
 Change log:
+- v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): today_counts test uses `not_due`.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): Test for today_counts.
