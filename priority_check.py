@@ -6,9 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): sequence_place: "task N of M" uses the task's position
+  in project order.
 - v0.1.28 (2026-11-07): Synchronized module version metadata.
 - v0.1.27 (2026-11-07): in_today, predict (an edit's result after the refresh
   rules), place_in_list and prune_order.
@@ -426,6 +428,18 @@ def sequence_next(project_tasks: Iterable[Task], today: date) -> Optional[Task]:
         if is_next_candidate(task, today):
             return task
     return None
+
+
+def sequence_place(project_tasks: Iterable[Task], task_id: str, completed: int) -> Tuple[int, int]:
+    """Return (N, M) for a sequential project's "task N of M".
+
+    N is the project's `completed` to-dos plus the task's position among the
+    open ones in project order; M is completed plus open. `task_id` must be
+    one of `project_tasks`.
+    """
+    ordered = sorted(project_tasks, key=lambda t: t.project_rank)
+    position = next(i for i, t in enumerate(ordered, 1) if t.uuid == task_id)
+    return completed + position, completed + len(ordered)
 
 
 def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change]:

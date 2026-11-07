@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): Test that a due task removed from Things' Today is
+  still listed.
 - v0.1.28 (2026-11-07): Test for count_completed.
 - v0.1.27 (2026-11-07): Test that errors.log is capped.
 - v0.1.26 (2026-11-07): Synchronized module version metadata.
@@ -369,6 +371,13 @@ class DatabaseTests(unittest.TestCase):
 
     def test_today_membership_and_order(self) -> None:
         self.assertEqual(self._ids("today"), ["today2", "today1", "overdue"])
+
+    def test_due_task_removed_from_things_today_still_listed(self) -> None:
+        # Things keeps a due task out of its Today once the user removes it
+        # (deadlineSuppressionDate); Do Things always shows what is due.
+        with write_db(self.path) as conn:
+            conn.execute("UPDATE TMTask SET deadlineSuppressionDate = 1 WHERE uuid = 'overdue'")
+        self.assertIn("overdue", self._ids("today"))
 
     def test_custom_searches(self) -> None:
         # P searches list only tasks in Today: tagged tasks starting later, or

@@ -3,9 +3,12 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): Today (and the P searches) include due tasks the user
+  removed from Things' Today (deadlineSuppressionDate ignored); _TODAY_CLAUSE
+  replaces _today_clause and _has_column.
 - v0.1.28 (2026-11-07): count_completed (completed to-dos per project),
   sharing its query with read_last_completed.
 - v0.1.27 (2026-11-07): errors.log is capped at 1 MB (RotatingFileHandler, one
@@ -208,11 +211,6 @@ def open_things_db(path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
-    """Return True if `table` has `column` (the Things schema varies by version)."""
-    return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})"))
-
-
 # Columns shared by every task query. Tags are concatenated with the ASCII unit
 # separator (char 31) because tag names may contain commas.
 _TASK_SELECT = f"""
@@ -278,33 +276,28 @@ def _project_rank(heading_id: Optional[str], heading_index: Optional[int], task_
     return (1, heading_index or 0, task_index or 0)
 
 
-def _today_clause(conn: sqlite3.Connection) -> str:
-    """Return the where clause for Things' Today, taking today's packed date twice.
-
-    Today = started tasks dated today or earlier, plus tasks due today or overdue.
-    """
-    deadline_clause = "(t.deadline IS NOT NULL AND t.deadline <= ?"
-    if _has_column(conn, "TMTask", "deadlineSuppressionDate"):
-        deadline_clause += " AND t.deadlineSuppressionDate IS NULL"
-    deadline_clause += ")"
-    return (
-        f"((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) "
-        f"AND t.startDate IS NOT NULL AND t.startDate <= ?) OR {deadline_clause})"
-    )
+# Where clause for Do Things' Today, taking today's packed date twice: started
+# tasks dated today or earlier, plus tasks due today or overdue. Unlike Things,
+# a due task the user removed from Things' Today (deadlineSuppressionDate) is
+# still included: Do Things always shows what is due.
+_TODAY_CLAUSE = (
+    f"((t.start IN ({START_ANYTIME}, {START_SOMEDAY}) AND t.startDate IS NOT NULL AND t.startDate <= ?) "
+    "OR (t.deadline IS NOT NULL AND t.deadline <= ?))"
+)
 
 
-def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, list, str]:
+def _list_query(name: str, today: int) -> Tuple[str, list, str]:
     """Return (where clause, params, order clause) for one of APP_LISTS.
 
     The clause covers only what the list selects; read_list adds _ACTIVE.
     `today` is today's date in Things' packed format.
     """
     if name == "today":
-        return _today_clause(conn), [today, today], "t.todayIndex, t.\"index\""
+        return _TODAY_CLAUSE, [today, today], "t.todayIndex, t.\"index\""
     if name in ("p1", "p2", "p3"):
         # Tasks in Today with the tag: a task tagged for a later start shows once it starts.
         where = (
-            f"{_today_clause(conn)} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
+            f"{_TODAY_CLAUSE} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
             "ON tg.uuid = tt.tags WHERE tt.tasks = t.uuid AND tg.title = ?)"
         )
         return where, [today, today, name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
@@ -316,7 +309,7 @@ def _list_query(conn: sqlite3.Connection, name: str, today: int) -> Tuple[str, l
 
 def read_list(conn: sqlite3.Connection, name: str, today: date) -> List[Task]:
     """Return the open and today-completed to-dos in one of APP_LISTS, in Things' order."""
-    where, params, order = _list_query(conn, name, pack_things_date(today))
+    where, params, order = _list_query(name, pack_things_date(today))
     start_of_today = datetime.combine(today, datetime.min.time(), tzinfo=LOCAL_TZ).timestamp()
     rows = conn.execute(
         f"{_TASK_SELECT} AND {_ACTIVE} AND ({where}) ORDER BY {order}", [start_of_today] + params

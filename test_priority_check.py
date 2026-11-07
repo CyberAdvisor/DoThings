@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): Tests for sequence_place.
 - v0.1.28 (2026-11-07): Synchronized module version metadata.
 - v0.1.27 (2026-11-07): Tests for in_today, predict, place_in_list and
   prune_order.
@@ -66,6 +67,7 @@ from priority_check import (
     prune_order,
     required_priority,
     sequence_next,
+    sequence_place,
     today_counts,
     update_order,
 )
@@ -524,6 +526,17 @@ class OrderingTests(unittest.TestCase):
         self.assertEqual(deadline_state(TOMORROW, TODAY), "future")
         self.assertIsNone(deadline_state(None, TODAY))
 
+
+
+class SequencePlaceTests(unittest.TestCase):
+    """The "task N of M" place of a sequential project's started task."""
+
+    def test_position_in_project_order_after_completed(self) -> None:
+        tasks = [Task("A", "A", project_rank=(0, 0, 5)), Task("B", "B", project_rank=(0, 0, 1)),
+                 Task("C", "C", project_rank=(1, 0, 0))]
+        self.assertEqual(sequence_place(tasks, "A", 2), (4, 5))
+        self.assertEqual(sequence_place(tasks, "B", 0), (1, 3))
+        self.assertEqual(sequence_place(tasks, "C", 0), (3, 3))
 
 
 class PredictTests(unittest.TestCase):

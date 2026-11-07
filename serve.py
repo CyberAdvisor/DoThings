@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): The sequential marker uses sequence_place (position in
+  project order, not completed + 1).
 - v0.1.28 (2026-11-07): Rows of tasks a sequential project started carry
   `sequence` ("task 2 of 5"), in lists and the edit preview.
 - v0.1.27 (2026-11-07): POST /api/edit/preview shows an edit's result without
@@ -140,6 +142,7 @@ from priority_check import (
     predict,
     prune_order,
     required_priority,
+    sequence_place,
     today_counts,
     update_order,
 )
@@ -325,8 +328,7 @@ def sequence_labels(conn: sqlite3.Connection) -> Dict[str, str]:
     """Return {task id: "task N of M"} for each task a sequential project started.
 
     Only tasks still open with the start date Do Things gave them count
-    (find_pulled). N is the project's completed to-dos plus one, M the
-    completed plus the open ones.
+    (find_pulled). N and M come from sequence_place.
     """
     projects = read_sequential_projects(conn)
     done = count_completed(conn, projects)
@@ -334,8 +336,8 @@ def sequence_labels(conn: sqlite3.Connection) -> Dict[str, str]:
     for project, record in load_pulls().items():
         tasks = projects.get(project, [])
         if find_pulled(tasks, record.task, record.started_on) is not None:
-            finished = done.get(project, 0)
-            labels[record.task] = f"task {finished + 1} of {finished + len(tasks)}"
+            place, total = sequence_place(tasks, record.task, done.get(project, 0))
+            labels[record.task] = f"task {place} of {total}"
     return labels
 
 

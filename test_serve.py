@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.28
+Version: 0.1.29
 
 Change log:
+- v0.1.29 (2026-11-07): Test the marker when the started task isn't first in
+  the project.
 - v0.1.28 (2026-11-07): Test that a started sequential task shows its place,
   and loses it when its date changes.
 - v0.1.27 (2026-11-07): Tests for the edit preview, the refresh pause and
@@ -339,6 +341,12 @@ class ProjectTests(MockThingsTestCase):
         tomorrow = (TODAY + timedelta(days=1)).isoformat()
         preview = serve.preview_edit({"id": "s2", "list": "today", "changes": {"when": tomorrow}})
         self.assertIsNone(preview["row"]["sequence"])
+
+    def test_place_is_position_in_project_order(self) -> None:
+        save_pulls({"seq": Pull("s2", TODAY, None)}, self.pulls_path)  # s2 started, s1 still undated.
+        self.start("s2")
+        rows = {t["id"]: t for g in serve.list_response("today")["groups"] for t in g["tasks"]}
+        self.assertEqual(rows["s2"]["sequence"], "task 2 of 3")
 
     def test_old_record_without_trigger_is_never_undone(self) -> None:
         save_pulls({"seq": Pull("s2", TODAY)}, self.pulls_path)  # As written by v0.1.17.
