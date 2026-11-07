@@ -14,7 +14,7 @@ On every list refresh (page load, window focus, every 60 seconds), each Today ta
 
 Refresh changes never touch deadlines.
 
-Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edit`), unless the same edit sets one. The page mirrors this so the Deadline row disappears before saving.
+Editor: choosing Someday or Anytime for When also clears the deadline (`plan_edit`), unless the same edit sets one. Deferring the start to a date after today moves a deadline that is before that date to it (so the task leaves Today), unless the same edit sets or clears the deadline; the page applies the same rule in `setStartDate`. The page mirrors this so the Deadline row disappears before saving.
 
 Manual moves:
 - All P tags are replaced with the destination tag.

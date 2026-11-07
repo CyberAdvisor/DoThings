@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.13
+  Version: 0.1.14
 
   Change log:
+  - v0.1.14 (2026-11-07): Deferring When to a later date (Tomorrow or the
+    calendar) moves a deadline that is before it to that date, visibly.
   - v0.1.13 (2026-11-07): Moves, reorders, check-offs and edit saves update
     the page immediately and are confirmed with Things in the background, in
     order (a failure redraws Things' real state with a message). Tomorrow
@@ -739,7 +741,7 @@ function buildEditor() {
       // Defer to tomorrow in one click; the deadline is left as it is.
       const defer = el("button", "secondary ed-tomorrow", "Tomorrow");
       defer.type = "button";
-      defer.onclick = () => { draft.when = { kind: "date", date: tomorrow }; state.edit.picker = null; redrawEditor(); };
+      defer.onclick = () => { setStartDate(tomorrow); state.edit.picker = null; redrawEditor(); };
       parts.push(defer);
     }
     card.append(editorRow("When", ...parts));
@@ -887,7 +889,7 @@ function closePicker() {
  * Anytime also remove the deadline, matching the server's plan_edit rule.
  */
 function pickDate(which, value) {
-  const { draft, today, shown } = state.edit;
+  const { draft, shown } = state.edit;
   if (which === "deadline") {
     draft.deadline = value;
   } else if (value === "someday" || value === "anytime") {
@@ -895,10 +897,20 @@ function pickDate(which, value) {
     draft.deadline = "";
     shown.deadline = false;
   } else {
-    draft.when = { kind: value === today ? "today" : "date", date: value };
+    setStartDate(value);
   }
   state.edit.picker = null;
   redrawEditor();
+}
+
+/**
+ * Set the draft's start date. Deferring to a date after today also moves a
+ * deadline that is before that date to it, matching the server's plan_edit rule.
+ */
+function setStartDate(iso) {
+  const { draft, today } = state.edit;
+  draft.when = { kind: iso === today ? "today" : "date", date: iso };
+  if (iso > today && draft.deadline && draft.deadline < iso) draft.deadline = iso;
 }
 
 /** Return the YYYY-MM-DD date `days` after `iso`. */

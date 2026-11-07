@@ -6,9 +6,11 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.13
+Version: 0.1.14
 
 Change log:
+- v0.1.14 (2026-11-07): Deferring the start to a later date moves a deadline
+  that is before that date to it (unless the edit sets the deadline).
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): today_counts returns `not_due` (open tasks that are
   not due) instead of all open tasks, matching Things' sidebar.
@@ -233,7 +235,8 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
     A priority change applies the move rules (plan_move), then the explicit
     fields are layered on top: a deadline or When chosen in the edit wins over
     what the move rules would set. Choosing Someday or Anytime clears the
-    deadline unless the edit also sets one.
+    deadline, and deferring the start to a date after today moves a deadline
+    that is before that date to it, unless the edit also sets the deadline.
     """
     if edit.when_keyword is not None and edit.when_keyword not in WHEN_KEYWORDS:
         raise ValueError(f"Unknown When value: {edit.when_keyword!r}")
@@ -251,6 +254,10 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
         change.set_deadline, change.clear_deadline = None, True
     if edit.when_date is not None:
         change.set_start_date, change.set_when = edit.when_date, None
+        deferred = edit.when_date > today
+        deadline_before = task.deadline is not None and task.deadline < edit.when_date
+        if deferred and deadline_before and edit.deadline is None and not edit.clear_deadline:
+            change.set_deadline, change.clear_deadline = edit.when_date, False
     elif edit.when_keyword is not None:
         change.set_start_date, change.set_when = None, edit.when_keyword
         if edit.deadline is None:

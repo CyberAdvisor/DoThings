@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.13
+Version: 0.1.14
 
 Change log:
+- v0.1.14 (2026-11-07): Tests for deferral moving an earlier deadline.
 - v0.1.13 (2026-11-07): Synchronized module version metadata.
 - v0.1.12 (2026-11-07): today_counts test uses `not_due`.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.
@@ -225,6 +226,33 @@ class PlanEditTests(unittest.TestCase):
                                    TaskEdit(when_keyword=keyword), TODAY)
                 self.assertEqual(change.set_when, keyword)
                 self.assertTrue(change.clear_deadline)
+
+    def test_deferral_moves_earlier_deadline_to_new_start(self) -> None:
+        friday = TODAY + timedelta(days=6)
+        for deadline in (TODAY, YESTERDAY, TOMORROW):
+            with self.subTest(deadline=deadline):
+                change = plan_edit(make_task(tags=["P1"], deadline=deadline, start_date=TODAY),
+                                   TaskEdit(when_date=friday), TODAY)
+                self.assertEqual((change.set_start_date, change.set_deadline), (friday, friday))
+
+    def test_deferral_leaves_later_or_missing_deadline_alone(self) -> None:
+        later = TODAY + timedelta(days=10)
+        for deadline in (later, TOMORROW, None):
+            with self.subTest(deadline=deadline):
+                change = plan_edit(make_task(tags=["P2"], deadline=deadline, start_date=TODAY),
+                                   TaskEdit(when_date=TOMORROW), TODAY)
+                self.assertIsNone(change.set_deadline)
+                self.assertFalse(change.clear_deadline)
+
+    def test_start_today_is_not_a_deferral(self) -> None:
+        change = plan_edit(make_task(tags=["P1"], deadline=YESTERDAY), TaskEdit(when_date=TODAY), TODAY)
+        self.assertIsNone(change.set_deadline)
+
+    def test_explicit_deadline_wins_over_deferral(self) -> None:
+        change = plan_edit(make_task(tags=["P1"], deadline=TODAY), TaskEdit(when_date=TOMORROW, deadline=TODAY), TODAY)
+        self.assertEqual(change.set_deadline, TODAY)
+        change = plan_edit(make_task(tags=["P1"], deadline=TODAY), TaskEdit(when_date=TOMORROW, clear_deadline=True), TODAY)
+        self.assertTrue(change.clear_deadline)
 
     def test_deadline_set_in_same_edit_is_kept_with_someday(self) -> None:
         later = TODAY + timedelta(days=9)
