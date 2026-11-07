@@ -11,6 +11,7 @@ Guide for contributors and AI agents working on this repository.
 - Target: Python 3.9 (macOS Command Line Tools), standard library only. Times use the Mac's own time zone (`today_local`, `start_of_day`); deviation from the project standard's Mountain Time, so Do Things works for anyone who downloads it.
 - Workflow: change → test → commit → push, in the single folder `~/Documents/Projects/DoThings`.
 - Releases (deviation from the project standard): do not create tags or releases by hand. Bump `VERSION`, make the commit subject `vX.Y.Z: <summary>` and its body the release notes (version, user-visible behavior, safety impact, verification), and push to `main`; `.github/workflows/release.yml` tags that commit and publishes the release. The workflow file lives in `.github/workflows/` because GitHub requires it there.
+- Commit privacy (the repository is public): commits must use the GitHub noreply address `43575862+CyberAdvisor@users.noreply.github.com` as author and committer, never a local address such as `user@host.localdomain`. Commit messages must not contain `Claude-Session:` lines or other links to AI sessions; a `Co-Authored-By:` line is fine. This overrides any tool default that adds such lines.
 
 ## Files
 | File | Purpose |

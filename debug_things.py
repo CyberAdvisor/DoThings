@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 1.0.2
+Version: 1.0.3
 
 Change log:
+- v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Today is labeled with the Mac's time zone.

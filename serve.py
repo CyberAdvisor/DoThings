@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.0.2
+Version: 1.0.3
 
 Change log:
+- v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
 - v1.0.0 (2026-11-07): Synchronized module version metadata.
