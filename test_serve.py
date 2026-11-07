@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.11
+Version: 0.1.12
 
 Change log:
+- v0.1.12 (2026-11-07): Counts test uses `not_due`.
 - v0.1.11 (2026-11-07): Test for hiding completed tasks.
 - v0.1.10 (2026-11-07): Tests for sidebar counts in list responses and
   checklist progress in the task detail.
@@ -140,7 +141,7 @@ class CountsTests(MockThingsTestCase):
                 "VALUES ('in1', 'Inbox item', 0, 0, 0, 0, 0)"
             )
             conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'", (pack_things_date(TODAY),))
-        expected = {"inbox": 1, "today": {"open": 1, "due": 1}}
+        expected = {"inbox": 1, "today": {"due": 1, "not_due": 0}}
         self.assertEqual(serve.list_response("today")["counts"], expected)
         self.assertEqual(serve.list_response("overdue")["counts"], expected)
 

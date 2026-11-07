@@ -5,9 +5,10 @@ exist, whether the P1-P3 tags exist, and every Today task with its tags,
 dates, completion, required priority and the change the refresh rules would make.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.11
+Version: 0.1.12
 
 Change log:
+- v0.1.12 (2026-11-07): Synchronized module version metadata.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): Schema check also requires TMChecklistItem (task, status).
 - v0.1.9 (2026-11-07): The planned change also shows a start date being set.

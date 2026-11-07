@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 0.1.11
+  Version: 0.1.12
 
   Change log:
+  - v0.1.12 (2026-11-07): Today's gray count is the tasks that aren't due (as
+    in Things). The Hide Completed checkbox is the same round circle as the
+    task checkboxes.
   - v0.1.11 (2026-11-07): "Hide Completed" checkbox under the searches hides
     tasks checked off today in every view; remembered in this browser.
   - v0.1.10 (2026-11-07): Sidebar counts as in Things: Inbox items, and for
@@ -79,6 +82,16 @@
   }
   .nav-item .opens-things { color: var(--muted); }
   .nav-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+  /* The Hide Completed checkbox looks like a task's round checkbox. */
+  .nav-option input {
+    appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; flex-shrink: 0;
+    border: 1.5px solid var(--muted); border-radius: 50%; cursor: pointer; position: relative;
+  }
+  .nav-option input:checked { background: var(--muted); }
+  .nav-option input:checked::after {
+    content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 3px; height: 7px;
+    border: solid #fff; border-width: 0 1.6px 1.6px 0; transform: rotate(45deg);
+  }
   .nav-item .opens-things svg { width: 12px; height: 12px; }
   .nav-footer { margin-top: auto; padding: 8px 10px; color: var(--muted); font-size: 12px; }
   .nav-footer a { color: var(--muted); cursor: pointer; text-decoration: underline; }
@@ -241,7 +254,7 @@ const state = {
   drag: null,     // { id, from } while a task is being dragged.
   status: "",     // Message above the list; kept across redraws until replaced.
   edit: null,     // The open inline editor (see startEdit), or null.
-  counts: null,   // Sidebar counts from the last list response: {inbox, today: {open, due}}.
+  counts: null,   // Sidebar counts from the last list response: {inbox, today: {due, not_due}}.
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
   version: "",
 };
@@ -344,7 +357,8 @@ function renderSidebar() {
 
 /**
  * Add the counts Things shows beside a sidebar entry: the Inbox item count,
- * and for Today a red badge of tasks due today or overdue plus the open total.
+ * and for Today a red badge of tasks due today or overdue plus the number of
+ * other (not due) open tasks.
  * Zero counts are not shown.
  */
 function appendCounts(extra, id) {
@@ -352,7 +366,7 @@ function appendCounts(extra, id) {
   if (!counts) return;
   if (id === "today") {
     if (counts.today.due) extra.append(el("span", "badge", String(counts.today.due)));
-    if (counts.today.open) extra.append(el("span", "count", String(counts.today.open)));
+    if (counts.today.not_due) extra.append(el("span", "count", String(counts.today.not_due)));
   } else if (id === "inbox" && counts.inbox) {
     extra.append(el("span", "count", String(counts.inbox)));
   }

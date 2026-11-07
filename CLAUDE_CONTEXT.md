@@ -45,7 +45,7 @@ Without the start-date step, clearing the deadline of a deadline-only task would
   - `rt1_recurrenceRule` is non-null on repeating templates, which are excluded.
 - Checklists: `TMChecklistItem(task, status)`; status other than 0 (completed or canceled) counts as done. Shown read-only as progress in the editor.
 - "Hide Completed" (sidebar checkbox, saved in the browser's localStorage as `dothings.hideCompleted`) adds `hide_completed=1` to `/api/list`, which drops today's completed tasks from the list but not from the counts.
-- Sidebar counts come with every list response: Inbox = open, untrashed to-dos with `start` 0; Today = open Today tasks, and the red badge = those due today or overdue (`today_counts`).
+- Sidebar counts come with every list response: Inbox = open, untrashed to-dos with `start` 0; Today: red badge = open tasks due today or overdue, gray number = the other open Today tasks (`today_counts`: `due`, `not_due`), as in Things.
 - Tags: `TMTaskTag(tasks, tags)` joins `TMTag(uuid, title)`. Tag titles are concatenated with `char(31)` because titles can contain commas.
 - Today = open to-dos with `start` in (1, 2) and `startDate <= today`, plus tasks with `deadline <= today` (excluding those with `deadlineSuppressionDate` set, when that column exists).
 - Every list shows open to-dos plus those completed since local midnight (`status` 3 and `stopDate` ≥ midnight; `stopDate` is Unix time). They come back as `Task.completed_at`, are sorted after open tasks (`completed_last`, oldest completion first), are skipped by the refresh rules, and can't be moved. Canceled to-dos are never shown.

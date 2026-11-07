@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.11
+Version: 0.1.12
 
 Change log:
+- v0.1.12 (2026-11-07): today_counts test uses `not_due`.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): Test for today_counts.
 - v0.1.9 (2026-11-07): Tests for the start-date refresh rule and for Someday
@@ -139,8 +140,8 @@ class TodayCountsTests(unittest.TestCase):
             make_task("plain"),
             make_task("done_due", deadline=TODAY, completed_at=1.0),
         ]
-        self.assertEqual(today_counts(tasks, TODAY), {"open": 4, "due": 2})
-        self.assertEqual(today_counts([], TODAY), {"open": 0, "due": 0})
+        self.assertEqual(today_counts(tasks, TODAY), {"due": 2, "not_due": 2})
+        self.assertEqual(today_counts([], TODAY), {"due": 0, "not_due": 0})
 
 
 class CompletionTests(unittest.TestCase):

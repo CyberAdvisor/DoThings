@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.11
+Version: 0.1.12
 
 Change log:
+- v0.1.12 (2026-11-07): Synchronized module version metadata.
 - v0.1.11 (2026-11-07): Synchronized module version metadata.
 - v0.1.10 (2026-11-07): Tests for count_inbox and read_checklist_progress.
 - v0.1.9 (2026-11-07): Synchronized module version metadata.

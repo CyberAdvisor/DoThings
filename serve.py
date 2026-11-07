@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.11
+Version: 0.1.12
 
 Change log:
+- v0.1.12 (2026-11-07): Synchronized module version metadata.
 - v0.1.11 (2026-11-07): /api/list takes `hide_completed=1` to leave out
   tasks completed today (the sidebar counts are unaffected).
 - v0.1.10 (2026-11-07): List responses include sidebar counts (Inbox; Today
