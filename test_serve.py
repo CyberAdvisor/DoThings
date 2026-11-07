@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): Sequence flow tests use Pull records with the
+  triggering task, including Things moving the reopened task to the bottom.
 - v0.1.17 (2026-11-07): The sequence record is kept in the test's temporary
   folder; tests for undoing a started task when an earlier one is reopened.
 - v0.1.16 (2026-11-07): Sequential project tests now check that the next
@@ -40,6 +42,7 @@ from unittest import mock
 import serve
 from common import (
     LOCAL_TZ,
+    Pull,
     START_ANYTIME,
     STATUS_COMPLETED,
     STATUS_OPEN,
@@ -214,12 +217,6 @@ class ProjectTests(MockThingsTestCase):
         with write_db(self.db_path) as conn:
             conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = ?", (pack_things_date(when), uuid))
 
-    def set_status(self, uuid: str, status: int) -> None:
-        """Complete (3) or reopen (0) `uuid` in the mock database."""
-        with write_db(self.db_path) as conn:
-            conn.execute("UPDATE TMTask SET status = ?, stopDate = ? WHERE uuid = ?",
-                         (status, 0 if status else None, uuid))
-
     def sent(self) -> list:
         """(task id, what) for each change the refresh sent, then forget them."""
         calls = [c[0][0] for c in self.apply_change.call_args_list]
@@ -227,25 +224,54 @@ class ProjectTests(MockThingsTestCase):
         return [(c.task_id, "start" if c.set_start_date else "undo" if c.set_when == "anytime" else "tags")
                 for c in calls]
 
+    def set_status(self, uuid: str, status: int, stop: float = 0) -> None:
+        """Complete (3) or reopen (0) `uuid` in the mock database."""
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET status = ?, stopDate = ? WHERE uuid = ?",
+                         (status, stop if status else None, uuid))
+
+    def move_to_bottom(self, uuid: str) -> None:
+        """Do what Things does to a reopened task: put it last in the project."""
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET \"index\" = 99 WHERE uuid = ?", (uuid,))
+
     def test_unchecking_returns_started_task_to_undated(self) -> None:
         serve.list_response("today")
         self.assertIn(("s1", "start"), self.sent())
-        self.assertEqual(load_pulls(self.pulls_path), {"seq": ("s1", TODAY)})
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": Pull("s1", TODAY, None)})
         self.start("s1")
-        self.set_status("s1", 3)  # Checked off.
+        self.set_status("s1", 3, stop=100)  # Checked off.
         serve.list_response("today")
         self.assertIn(("s2", "start"), self.sent())
-        self.assertEqual(load_pulls(self.pulls_path), {"seq": ("s2", TODAY)})
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": Pull("s2", TODAY, "s1")})
         self.start("s2")
-        self.set_status("s1", 0)  # Unchecked again.
+        self.set_status("s1", 0)  # Unchecked again; Things moves it to the bottom.
+        self.move_to_bottom("s1")
         serve.list_response("today")
         sent = self.sent()
         self.assertIn(("s2", "undo"), sent)
         self.assertNotIn(("s3", "start"), sent)
-        self.assertEqual(load_pulls(self.pulls_path), {})
+        # s1 is now the task in progress, so the undone s2 isn't started again.
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": Pull("s1", TODAY, None)})
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET startDate = NULL WHERE uuid = 's2'")  # As Things applied the undo.
+        serve.list_response("today")
+        self.assertNotIn(("s2", "start"), self.sent())
+        # Completing s1 again starts the first undated task in project order: s2.
+        self.set_status("s1", 3, stop=200)
+        serve.list_response("today")
+        self.assertIn(("s2", "start"), self.sent())
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": Pull("s2", TODAY, "s1")})
+
+    def test_old_record_without_trigger_is_never_undone(self) -> None:
+        save_pulls({"seq": Pull("s2", TODAY)}, self.pulls_path)  # As written by v0.1.17.
+        self.start("s1")
+        self.start("s2")
+        serve.list_response("today")
+        self.assertNotIn(("s2", "undo"), self.sent())
 
     def test_task_redated_by_user_is_left_alone(self) -> None:
-        save_pulls({"seq": ("s2", TODAY)}, self.pulls_path)
+        save_pulls({"seq": Pull("s2", TODAY, "s1")}, self.pulls_path)
         self.start("s1")
         self.start("s2", TODAY + timedelta(days=2))  # The user moved it.
         serve.list_response("today")

@@ -6,9 +6,11 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): Sequential projects also show Do Things' record (the
+  task it started and the one it followed), which decides what is in progress.
 - v0.1.17 (2026-11-07): Synchronized module version metadata.
 - v0.1.16 (2026-11-07): Lists each sequential project's task in progress and
   whether the refresh would give it a start date of today (no more hiding).
@@ -38,13 +40,14 @@ import sqlite3
 from common import (
     PROJECT_VERSION,
     find_things_db_path,
+    load_pulls,
     missing_priority_tags,
     open_things_db,
     read_list,
     read_sequential_projects,
     today_local,
 )
-from priority_check import Change, plan_refresh, plan_sequence, required_priority, sequence_next
+from priority_check import Change, find_pulled, plan_refresh, plan_sequence, required_priority, sequence_next
 
 # Columns the queries in common.py depend on.
 REQUIRED_COLUMNS = {
@@ -104,14 +107,19 @@ def run() -> None:
         print(f"Priority tags missing in Things: {', '.join(missing) if missing else 'none'}")
         tasks = read_list(conn, "today", today)
         projects = read_sequential_projects(conn)
+    pulls = load_pulls()
     print(f"\nSequential projects: {len(projects)}")
-    for project_tasks in projects.values():
-        current = sequence_next(project_tasks, today)
-        planned = describe_change(plan_sequence(project_tasks, today) or Change("", None))
-        print(
-            f"- {project_tasks[0].context!r}: {len(project_tasks)} open; in progress: "
-            f"{current.title if current else 'none'!r}; planned={planned or 'no change'}"
-        )
+    for project, project_tasks in projects.items():
+        record = pulls.get(project)
+        recorded = find_pulled(project_tasks, record.task, record.started_on) if record else None
+        if recorded is not None:
+            # The refresh treats the recorded task as in progress (see serve.step_sequences).
+            state = f"in progress (recorded, after {record.after or 'none'}): {recorded.title!r}"
+        else:
+            current = sequence_next(project_tasks, today)
+            planned = describe_change(plan_sequence(project_tasks, today) or Change("", None))
+            state = f"next by order: {current.title if current else 'none'!r}; planned={planned or 'no change'}"
+        print(f"- {project_tasks[0].context!r}: {len(project_tasks)} open; {state}")
     print(f"\nToday tasks: {len(tasks)}")
     for task in tasks:
         change = plan_refresh(task, today)

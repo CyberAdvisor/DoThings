@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): The sequence record (Pull) also keeps `after`, the
+  task whose completion led to the start; read_last_completed finds it.
 - v0.1.17 (2026-11-07): load_pulls/save_pulls keep, per sequential project,
   the task Do Things started and the date it gave it (sequence_pulls.json).
   The order and pull files share _load_json_object/_save_json.
@@ -56,7 +58,7 @@ import subprocess
 import time
 import urllib.parse
 from datetime import date, datetime
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from priority_check import PRIORITIES, Change, Task
@@ -317,6 +319,22 @@ def read_sequential_projects(conn: sqlite3.Connection) -> Dict[str, List[Task]]:
     return projects
 
 
+def read_last_completed(conn: sqlite3.Connection, project_ids: Iterable[str]) -> Dict[str, str]:
+    """Return {project id: its most recently completed to-do} (directly or under a heading)."""
+    ids = sorted(set(project_ids))
+    if not ids:
+        return {}
+    placeholders = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT t.uuid, COALESCE(t.project, h.project) AS project_id FROM TMTask t "
+        "LEFT JOIN TMTask h ON h.uuid = t.heading "
+        f"WHERE t.type = {TYPE_TODO} AND t.status = {STATUS_COMPLETED} AND t.trashed = 0 "
+        f"AND COALESCE(t.project, h.project) IN ({placeholders}) ORDER BY t.stopDate",
+        ids,
+    )
+    return {row["project_id"]: row["uuid"] for row in rows}  # Later rows (newer) overwrite.
+
+
 def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:
     """Return the choices for the edit view.
 
@@ -512,23 +530,42 @@ def save_order(order: Dict[str, List[str]], path: str = ORDER_PATH) -> None:
     _save_json(order, path)
 
 
-def load_pulls(path: str = PULLS_PATH) -> Dict[str, Tuple[str, date]]:
-    """Load {project id: (task id, start date given)} for tasks Do Things started.
+class Pull(NamedTuple):
+    """A task Do Things started in a sequential project.
+
+    `task` was given the start date `started_on`. `after` is the task whose
+    completion led to it, or None (first start, or recorded by v0.1.17); if
+    `after` is opened again, the start is undone.
+    """
+
+    task: str
+    started_on: date
+    after: Optional[str] = None
+
+
+def load_pulls(path: str = PULLS_PATH) -> Dict[str, Pull]:
+    """Load {project id: Pull} for tasks Do Things started.
 
     Malformed entries are skipped, so a damaged file never causes an undo.
     """
-    pulls: Dict[str, Tuple[str, date]] = {}
+    pulls: Dict[str, Pull] = {}
     for project, entry in _load_json_object(path).items():
         try:
-            pulls[project] = (entry["task"], date.fromisoformat(entry["date"]))
-        except (TypeError, KeyError, ValueError):
+            after = entry.get("after")
+            if not isinstance(entry["task"], str) or not (after is None or isinstance(after, str)):
+                raise TypeError("ids must be strings")
+            pulls[project] = Pull(entry["task"], date.fromisoformat(entry["date"]), after)
+        except (AttributeError, TypeError, KeyError, ValueError):
             get_logger().error("Ignoring malformed sequence entry for project %s", project)
     return pulls
 
 
-def save_pulls(pulls: Dict[str, Tuple[str, date]], path: str = PULLS_PATH) -> None:
+def save_pulls(pulls: Dict[str, Pull], path: str = PULLS_PATH) -> None:
     """Save the tasks Do Things started in sequential projects."""
-    _save_json({p: {"task": t, "date": d.isoformat()} for p, (t, d) in pulls.items()}, path)
+    _save_json(
+        {p: {"task": r.task, "date": r.started_on.isoformat(), "after": r.after} for p, r in pulls.items()},
+        path,
+    )
 
 
 # --- Auth token -----------------------------------------------------------

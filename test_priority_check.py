@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): Undo tests use the task whose completion led to the
+  start, including after Things moved it to the bottom.
 - v0.1.17 (2026-11-07): Tests for find_pulled and plan_sequence_undo.
 - v0.1.16 (2026-11-07): Sequence tests now cover plan_sequence and
   sequence_next instead of hiding.
@@ -205,23 +207,25 @@ class SequenceTests(unittest.TestCase):
         self.assertIsNone(find_pulled(tasks, "a", YESTERDAY))  # Date changed since: leave it alone.
         self.assertIsNone(find_pulled(tasks, "gone", TODAY))   # Completed or removed.
 
-    def test_undo_when_earlier_task_reopened(self) -> None:
-        reopened = in_project("first", "S", (0, 0, 1), start_date=TODAY)
+    def test_undo_when_triggering_task_reopened(self) -> None:
+        # Things moves a reopened task to the bottom, so it now sorts after the started one.
+        reopened = in_project("first", "S", (0, 0, 9), start_date=TODAY)
         pulled = in_project("second", "S", (0, 0, 2), tags=["Home", "P2"], start_date=TODAY)
-        change = plan_sequence_undo([reopened, pulled], pulled, TODAY)
+        change = plan_sequence_undo([pulled, reopened], pulled, "first")
         self.assertEqual((change.task_id, change.set_when, change.tags), ("second", "anytime", ["Home"]))
         self.assertIsNone(change.set_start_date)
 
     def test_undo_keeps_tags_without_p_tag(self) -> None:
         reopened = in_project("first", "S", (0, 0, 1), start_date=TODAY)
         pulled = in_project("second", "S", (0, 0, 2), tags=["Home"], start_date=TODAY)
-        self.assertIsNone(plan_sequence_undo([reopened, pulled], pulled, TODAY).tags)
+        self.assertIsNone(plan_sequence_undo([reopened, pulled], pulled, "first").tags)
 
-    def test_no_undo_while_pulled_task_is_in_progress(self) -> None:
+    def test_no_undo_while_triggering_task_stays_done_or_unknown(self) -> None:
         pulled = in_project("second", "S", (0, 0, 2), start_date=TODAY)
         done = in_project("first", "S", (0, 0, 1), start_date=TODAY, completed_at=1.0)
-        later = in_project("third", "S", (0, 0, 3))
-        self.assertIsNone(plan_sequence_undo([done, pulled, later], pulled, TODAY))
+        self.assertIsNone(plan_sequence_undo([done, pulled], pulled, "first"))
+        self.assertIsNone(plan_sequence_undo([pulled], pulled, "first"))  # Not open (not listed).
+        self.assertIsNone(plan_sequence_undo([done, pulled], pulled, None))  # Unknown trigger.
 
     def test_nothing_to_do(self) -> None:
         self.assertIsNone(plan_sequence([], TODAY))

@@ -6,9 +6,12 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): The undo is triggered by the task whose completion
+  led to the start being open again, not by project order (Things moves a
+  reopened task to the bottom of its project).
 - v0.1.17 (2026-11-07): `find_pulled` and `plan_sequence_undo`: a task Do
   Things started in a sequential project goes back to undated when an
   earlier task in the project is open again.
@@ -376,15 +379,14 @@ def find_pulled(project_tasks: Iterable[Task], task_id: str, started_on: date) -
     return None
 
 
-def plan_sequence_undo(project_tasks: List[Task], pulled: Task, today: date) -> Optional[Change]:
+def plan_sequence_undo(project_tasks: Iterable[Task], pulled: Task, after_id: Optional[str]) -> Optional[Change]:
     """Return the change that puts a task Do Things started back to undated, if needed.
 
-    Needed when an earlier task in the project is open again (e.g. it was
-    unchecked), so `pulled` is no longer the task in progress. The task goes
-    back to Anytime with no start date, without the P tags it got in Today.
+    `after_id` is the task whose completion led Do Things to start `pulled`.
+    If that task is open again (it was unchecked), `pulled` goes back to
+    Anytime with no start date, without the P tags it got in Today.
     """
-    current = sequence_next(project_tasks, today)
-    if current is None or current.uuid == pulled.uuid or current.project_rank > pulled.project_rank:
+    if after_id is None or not any(t.uuid == after_id and not t.completed for t in project_tasks):
         return None
     other_tags = [t for t in pulled.tags if t not in PRIORITIES]
     tags = other_tags if len(other_tags) != len(pulled.tags) else None

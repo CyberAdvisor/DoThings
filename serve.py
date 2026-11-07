@@ -8,9 +8,13 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): The sequence record keeps the task whose completion
+  led to each start; unchecking that task undoes the start wherever Things
+  has moved it, and the reopened task is then recorded as in progress so the
+  undone task isn't started again straight away.
 - v0.1.17 (2026-11-07): Records the task started in each sequential project
   and, when an earlier task in the project is open again, returns it to
   undated (Anytime, without its P tag).
@@ -66,6 +70,7 @@ from common import (
     APP_LISTS,
     INDEX_HTML_PATH,
     PROJECT_VERSION,
+    Pull,
     SERVER_HOST,
     SERVER_PORT,
     THINGS_LISTS,
@@ -83,6 +88,7 @@ from common import (
     open_things_url,
     read_checklist_progress,
     read_edit_options,
+    read_last_completed,
     read_list,
     read_sequential_projects,
     read_task,
@@ -196,37 +202,52 @@ def apply_refresh_rules(
 def step_sequences(db_path: str, token: str, today: date) -> bool:
     """Start or undo the next task of each sequential project. Returns True if a write failed.
 
-    Each started task is recorded with the date given (sequence_pulls.json),
-    so only tasks Do Things started are ever put back to undated: when an
-    earlier task in the project is open again (plan_sequence_undo), the
-    started task returns to Anytime; otherwise the next undated task is
-    started (plan_sequence). Records that no longer apply are dropped.
+    Each started task is recorded (sequence_pulls.json) with the date given
+    and the task whose completion led to it, so only tasks Do Things started
+    are ever put back to undated. While a recorded task is open with that
+    date it is the one in progress and nothing else is started. If the task
+    it followed is open again (unchecked), it returns to Anytime
+    (plan_sequence_undo) and the reopened task is recorded as in progress
+    instead; Things moves a reopened task to the bottom of the project, so
+    position can't be relied on. With no task in progress, the next undated
+    task is started (plan_sequence). Records that no longer apply are dropped.
     """
     with open_things_db(db_path) as conn:
         projects = read_sequential_projects(conn)
+        last_done = read_last_completed(conn, projects)
     pulls = load_pulls()
     kept = {p: pulls[p] for p in pulls if p in projects}  # Drop projects no longer sequential or open.
-    failed = False
     for project, tasks in projects.items():
-        pulled = find_pulled(tasks, *kept[project]) if project in kept else None
+        record = kept.get(project)
+        pulled = find_pulled(tasks, record.task, record.started_on) if record else None
         if pulled is None:
             kept.pop(project, None)
-        undo = plan_sequence_undo(tasks, pulled, today) if pulled else None
-        if undo is not None:
-            if not apply_change(undo, token, db_path):
-                failed = True
-                break
-            del kept[project]
+            start = plan_sequence(tasks, today)
+            if start is not None:
+                if not apply_change(start, token, db_path):
+                    return save_and_fail(kept, pulls)
+                kept[project] = Pull(start.task_id, today, last_done.get(project))
             continue
-        start = plan_sequence(tasks, today)
-        if start is not None:
-            if not apply_change(start, token, db_path):
-                failed = True
-                break
-            kept[project] = (start.task_id, today)
+        undo = plan_sequence_undo(tasks, pulled, record.after)
+        if undo is None:
+            continue  # The recorded task is in progress.
+        if not apply_change(undo, token, db_path):
+            return save_and_fail(kept, pulls)
+        reopened = next(t for t in tasks if t.uuid == record.after)
+        if reopened.start_date is not None:
+            kept[project] = Pull(reopened.uuid, reopened.start_date, None)
+        else:
+            del kept[project]
     if kept != pulls:
         save_pulls(kept)
-    return failed
+    return False
+
+
+def save_and_fail(kept: Dict[str, Pull], pulls: Dict[str, Pull]) -> bool:
+    """Save the records changed so far after a failed write, and report the failure."""
+    if kept != pulls:
+        save_pulls(kept)
+    return True
 
 
 def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:

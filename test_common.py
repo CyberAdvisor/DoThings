@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.17
+Version: 0.1.18
 
 Change log:
+- v0.1.18 (2026-11-07): Pull records with `after`; read_last_completed.
 - v0.1.17 (2026-11-07): Tests for load_pulls/save_pulls.
 - v0.1.16 (2026-11-07): read_sequential_projects test replaces read_next_tasks.
 - v0.1.15 (2026-11-07): Tests for project position, the Sequential tag and
@@ -44,6 +45,7 @@ from typing import Iterator
 
 from common import (
     LOCAL_TZ,
+    Pull,
     START_ANYTIME,
     START_INBOX,
     START_SOMEDAY,
@@ -62,6 +64,7 @@ from common import (
     pack_things_date,
     read_checklist_progress,
     read_edit_options,
+    read_last_completed,
     read_list,
     read_sequential_projects,
     read_task,
@@ -225,11 +228,13 @@ class PullsFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "pulls.json")
             self.assertEqual(load_pulls(path), {})
-            save_pulls({"P1": ("t1", TODAY)}, path)
-            self.assertEqual(load_pulls(path), {"P1": ("t1", TODAY)})
+            save_pulls({"P1": Pull("t1", TODAY, "t0"), "P2": Pull("t2", TODAY)}, path)
+            self.assertEqual(load_pulls(path), {"P1": Pull("t1", TODAY, "t0"), "P2": Pull("t2", TODAY, None)})
             with open(path, "w", encoding="utf-8") as handle:
-                handle.write('{"P1": {"task": "t1", "date": "2026-11-07"}, "P2": {"task": "t2"}, "P3": "x"}')
-            self.assertEqual(load_pulls(path), {"P1": ("t1", TODAY)})
+                # A v0.1.17 entry (no "after"), then malformed ones.
+                handle.write('{"P1": {"task": "t1", "date": "2026-11-07"}, "P2": {"task": "t2"}, "P3": "x", '
+                             '"P4": {"task": 5, "date": "2026-11-07"}, "P5": {"task": "t", "date": "2026-11-07", "after": 3}}')
+            self.assertEqual(load_pulls(path), {"P1": Pull("t1", TODAY, None)})
             with open(path, "w", encoding="utf-8") as handle:
                 handle.write("not json")
             self.assertEqual(load_pulls(path), {})
@@ -436,6 +441,13 @@ class DatabaseTests(unittest.TestCase):
         # Only the open, tagged project; only its open to-dos (headings themselves aren't to-dos).
         self.assertEqual(set(projects), {"seq"})
         self.assertEqual(sorted(t.uuid for t in projects["seq"]), ["s_b", "s_top"])
+        with write_db(self.path) as conn:
+            conn.execute("UPDATE TMTask SET stopDate = 100 WHERE uuid = 's_done'")
+            conn.execute("UPDATE TMTask SET status = 3, stopDate = 200 WHERE uuid = 's_b'")
+        with open_things_db(self.path) as conn:
+            # The most recent completion, including under a heading.
+            self.assertEqual(read_last_completed(conn, ["seq"]), {"seq": "s_b"})
+            self.assertEqual(read_last_completed(conn, []), {})
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:
