@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential project's task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): Synchronized module version metadata.
 - v0.1.16 (2026-11-07): Lists each sequential project's task in progress and
   whether the refresh would give it a start date of today (no more hiding).
 - v0.1.15 (2026-11-07): Each task also shows its project position and, for

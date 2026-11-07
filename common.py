@@ -3,9 +3,12 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): load_pulls/save_pulls keep, per sequential project,
+  the task Do Things started and the date it gave it (sequence_pulls.json).
+  The order and pull files share _load_json_object/_save_json.
 - v0.1.16 (2026-11-07): read_sequential_projects returns the open to-dos of
   each project tagged Sequential (replaces read_next_tasks); tasks no longer
   carry a sequential flag.
@@ -64,6 +67,7 @@ ERRORS_LOG_PATH = os.path.join(BASE_DIR, "errors.log")
 INDEX_HTML_PATH = os.path.join(BASE_DIR, "index.html")
 ORDER_PATH = os.path.join(BASE_DIR, "task_order.json")
 TOKEN_PATH = os.path.join(BASE_DIR, "auth_token.txt")
+PULLS_PATH = os.path.join(BASE_DIR, "sequence_pulls.json")
 
 # Things 3 keeps its data in this group container. Since Things 3.15 the
 # database sits in a ThingsData-XXXXX subfolder; older versions put it directly
@@ -469,19 +473,33 @@ def apply_change(change: Change, token: str, db_path: str) -> bool:
 # --- Local task order -----------------------------------------------------
 
 
-def load_order(path: str = ORDER_PATH) -> Dict[str, List[str]]:
-    """Load the saved order within each priority; an unreadable file counts as empty."""
+def _load_json_object(path: str) -> dict:
+    """Load a JSON object from `path`; a missing, unreadable or non-object file counts as empty."""
     if not os.path.exists(path):
         return {}
     try:
         with open(path, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError) as error:
-        get_logger().error("Ignoring unreadable order file %s: %s", path, error)
+        get_logger().error("Ignoring unreadable file %s: %s", path, error)
         return {}
     if not isinstance(data, dict):
-        get_logger().error("Ignoring malformed order file %s", path)
+        get_logger().error("Ignoring malformed file %s", path)
         return {}
+    return data
+
+
+def _save_json(data: object, path: str) -> None:
+    """Save JSON atomically, so a crash never leaves a half-written file."""
+    temp_path = path + ".tmp"
+    with open(temp_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+    os.replace(temp_path, path)
+
+
+def load_order(path: str = ORDER_PATH) -> Dict[str, List[str]]:
+    """Load the saved order within each priority; an unreadable file counts as empty."""
+    data = _load_json_object(path)
     return {
         p: [i for i in data.get(p, []) if isinstance(i, str)]
         for p in PRIORITIES
@@ -490,11 +508,27 @@ def load_order(path: str = ORDER_PATH) -> Dict[str, List[str]]:
 
 
 def save_order(order: Dict[str, List[str]], path: str = ORDER_PATH) -> None:
-    """Save the order atomically, so a crash never leaves a half-written file."""
-    temp_path = path + ".tmp"
-    with open(temp_path, "w", encoding="utf-8") as handle:
-        json.dump(order, handle, indent=2)
-    os.replace(temp_path, path)
+    """Save the order within each priority."""
+    _save_json(order, path)
+
+
+def load_pulls(path: str = PULLS_PATH) -> Dict[str, Tuple[str, date]]:
+    """Load {project id: (task id, start date given)} for tasks Do Things started.
+
+    Malformed entries are skipped, so a damaged file never causes an undo.
+    """
+    pulls: Dict[str, Tuple[str, date]] = {}
+    for project, entry in _load_json_object(path).items():
+        try:
+            pulls[project] = (entry["task"], date.fromisoformat(entry["date"]))
+        except (TypeError, KeyError, ValueError):
+            get_logger().error("Ignoring malformed sequence entry for project %s", project)
+    return pulls
+
+
+def save_pulls(pulls: Dict[str, Tuple[str, date]], path: str = PULLS_PATH) -> None:
+    """Save the tasks Do Things started in sequential projects."""
+    _save_json({p: {"task": t, "date": d.isoformat()} for p, (t, d) in pulls.items()}, path)
 
 
 # --- Auth token -----------------------------------------------------------

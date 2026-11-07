@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): The sequence record is kept in the test's temporary
+  folder; tests for undoing a started task when an earlier one is reopened.
 - v0.1.16 (2026-11-07): Sequential project tests now check that the next
   undated task gets a start date of today, one at a time.
 - v0.1.15 (2026-11-07): Tests for sequential projects and project order in Today.
@@ -31,7 +33,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
@@ -42,7 +44,9 @@ from common import (
     STATUS_COMPLETED,
     STATUS_OPEN,
     THINGS_LISTS,
+    load_pulls,
     pack_things_date,
+    save_pulls,
 )
 from test_common import SCHEMA, TODAY, write_db
 
@@ -53,6 +57,7 @@ class MockThingsTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self.folder = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.folder.name, "main.sqlite")
+        self.pulls_path = os.path.join(self.folder.name, "sequence_pulls.json")
         conn = sqlite3.connect(self.db_path)
         conn.executescript(SCHEMA)
         conn.execute("INSERT INTO TMTag VALUES ('t1', 'P1')")
@@ -70,6 +75,9 @@ class MockThingsTestCase(unittest.TestCase):
             mock.patch.object(serve, "today_local", return_value=TODAY),
             mock.patch.object(serve, "load_order", return_value={}),
             mock.patch.object(serve, "save_order"),
+            # Keep the sequence record in the temporary folder, never the project's.
+            mock.patch.object(serve, "load_pulls", lambda: load_pulls(self.pulls_path)),
+            mock.patch.object(serve, "save_pulls", lambda pulls: save_pulls(pulls, self.pulls_path)),
         ]
         for patch in patches:
             patch.start()
@@ -200,6 +208,49 @@ class ProjectTests(MockThingsTestCase):
             conn.execute("UPDATE TMTask SET status = 3, stopDate = 0 WHERE uuid = 's1'")
         serve.list_response("today")
         self.assertEqual(self.started(), ["s2"])
+
+    def start(self, uuid: str, when=TODAY) -> None:
+        """Give `uuid` a start date in the mock database, as Things would after a start."""
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = ?", (pack_things_date(when), uuid))
+
+    def set_status(self, uuid: str, status: int) -> None:
+        """Complete (3) or reopen (0) `uuid` in the mock database."""
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET status = ?, stopDate = ? WHERE uuid = ?",
+                         (status, 0 if status else None, uuid))
+
+    def sent(self) -> list:
+        """(task id, what) for each change the refresh sent, then forget them."""
+        calls = [c[0][0] for c in self.apply_change.call_args_list]
+        self.apply_change.reset_mock()
+        return [(c.task_id, "start" if c.set_start_date else "undo" if c.set_when == "anytime" else "tags")
+                for c in calls]
+
+    def test_unchecking_returns_started_task_to_undated(self) -> None:
+        serve.list_response("today")
+        self.assertIn(("s1", "start"), self.sent())
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": ("s1", TODAY)})
+        self.start("s1")
+        self.set_status("s1", 3)  # Checked off.
+        serve.list_response("today")
+        self.assertIn(("s2", "start"), self.sent())
+        self.assertEqual(load_pulls(self.pulls_path), {"seq": ("s2", TODAY)})
+        self.start("s2")
+        self.set_status("s1", 0)  # Unchecked again.
+        serve.list_response("today")
+        sent = self.sent()
+        self.assertIn(("s2", "undo"), sent)
+        self.assertNotIn(("s3", "start"), sent)
+        self.assertEqual(load_pulls(self.pulls_path), {})
+
+    def test_task_redated_by_user_is_left_alone(self) -> None:
+        save_pulls({"seq": ("s2", TODAY)}, self.pulls_path)
+        self.start("s1")
+        self.start("s2", TODAY + timedelta(days=2))  # The user moved it.
+        serve.list_response("today")
+        self.assertNotIn(("s2", "undo"), self.sent())
+        self.assertEqual(load_pulls(self.pulls_path), {})
 
     def test_dated_tasks_left_alone(self) -> None:
         with write_db(self.db_path) as conn:

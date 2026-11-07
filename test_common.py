@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): Tests for load_pulls/save_pulls.
 - v0.1.16 (2026-11-07): read_sequential_projects test replaces read_next_tasks.
 - v0.1.15 (2026-11-07): Tests for project position, the Sequential tag and
   read_next_tasks.
@@ -54,6 +55,7 @@ from common import (
     count_inbox,
     is_valid_task_id,
     load_order,
+    load_pulls,
     load_token,
     missing_priority_tags,
     open_things_db,
@@ -64,6 +66,7 @@ from common import (
     read_sequential_projects,
     read_task,
     save_order,
+    save_pulls,
     save_token,
     unpack_things_date,
     validate_token,
@@ -213,6 +216,23 @@ class OrderFileTests(unittest.TestCase):
             # assertLogs captures the error so tests never write to errors.log.
             with self.assertLogs("dothings", level="ERROR"):
                 self.assertEqual(load_order(path), {})
+
+
+class PullsFileTests(unittest.TestCase):
+    """The record of tasks Do Things started in sequential projects."""
+
+    def test_round_trip_and_malformed_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "pulls.json")
+            self.assertEqual(load_pulls(path), {})
+            save_pulls({"P1": ("t1", TODAY)}, path)
+            self.assertEqual(load_pulls(path), {"P1": ("t1", TODAY)})
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write('{"P1": {"task": "t1", "date": "2026-11-07"}, "P2": {"task": "t2"}, "P3": "x"}')
+            self.assertEqual(load_pulls(path), {"P1": ("t1", TODAY)})
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("not json")
+            self.assertEqual(load_pulls(path), {})
 
 
 class DatabaseTests(unittest.TestCase):

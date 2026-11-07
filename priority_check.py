@@ -6,9 +6,12 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): `find_pulled` and `plan_sequence_undo`: a task Do
+  Things started in a sequential project goes back to undated when an
+  earlier task in the project is open again.
 - v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Instead
   `plan_sequence` gives the project's next undated task a start date of
   today (one at a time); dated tasks behave as normal. Removed
@@ -359,6 +362,33 @@ def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change
     if task is None or task.start_date is not None:
         return None
     return Change(task_id=task.uuid, tags=None, set_start_date=today)
+
+
+def find_pulled(project_tasks: Iterable[Task], task_id: str, started_on: date) -> Optional[Task]:
+    """Return the task Do Things started, if it is still open with the start date Do Things gave it.
+
+    None means the record no longer applies: the task was completed, removed,
+    or its date was changed since (by the user, so it must be left alone).
+    """
+    for task in project_tasks:
+        if task.uuid == task_id:
+            return task if task.start_date == started_on else None
+    return None
+
+
+def plan_sequence_undo(project_tasks: List[Task], pulled: Task, today: date) -> Optional[Change]:
+    """Return the change that puts a task Do Things started back to undated, if needed.
+
+    Needed when an earlier task in the project is open again (e.g. it was
+    unchecked), so `pulled` is no longer the task in progress. The task goes
+    back to Anytime with no start date, without the P tags it got in Today.
+    """
+    current = sequence_next(project_tasks, today)
+    if current is None or current.uuid == pulled.uuid or current.project_rank > pulled.project_rank:
+        return None
+    other_tags = [t for t in pulled.tags if t not in PRIORITIES]
+    tags = other_tags if len(other_tags) != len(pulled.tags) else None
+    return Change(task_id=pulled.uuid, tags=tags, set_when="anytime")
 
 
 def completed_last(tasks: List[Task]) -> List[Task]:

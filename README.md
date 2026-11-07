@@ -1,6 +1,7 @@
 # Do Things
 
 ## Change log
+- **v0.1.17 (2026-11-07):** In a sequential project, if you uncheck a completed task after Do Things has started the next one, that next task goes back to undated (Anytime, without its P tag). Only tasks Do Things started itself are undone, and not if you've changed their date since. Do Things remembers them in `sequence_pulls.json`.
 - **v0.1.16 (2026-11-07):** Sequential projects now work forwards instead of hiding tasks: the project's first task with no start date and no deadline gets a start date of today and appears in Today; when it is checked off, the next one does. Tasks in the project that already have a start date or deadline follow their own dates. Someday tasks are skipped.
 - **v0.1.15 (2026-11-07):** Within each priority group, tasks from the same project follow the order you set in that project in Things. Projects tagged **Sequential** in Things show only their next open task in Today (top to bottom, across headings); a later task still shows if it is due today or overdue. Today's sidebar counts match what Today shows.
 - **v0.1.14 (2026-11-07):** Deferring a task's start to a later date (with **Tomorrow** or the calendar) also moves its deadline to that date if the deadline was earlier, so a deferred task leaves Today. A deadline you set in the same edit is kept.
@@ -37,7 +38,7 @@ Things 3's Today list is a single flat list. Do Things shows the same tasks spli
   - moving out of P1 removes its deadline, and if the task was in Today only because of its deadline (no start date, or one after today), sets its start date to today so it stays in Today;
   - moving between P2 and P3 leaves the deadline alone.
 - Drag within a priority to reorder. The order is saved on your Mac in `task_order.json`. Tasks you haven't ordered here follow Things' Today order, except that tasks from the same project keep the order you set in that project in Things.
-- **Sequential projects:** tag a project `Sequential` in Things (create the tag once in Window › Tags) to work it in order. On each refresh, the project's first task (in Things' project order, across headings) with no start date and no deadline gets a start date of today, so it appears in Today. Nothing else is pulled in while it is open; when it is checked off, the next undated task is. Tasks that already have a start date or a deadline follow their own dates, and Someday tasks are skipped.
+- **Sequential projects:** tag a project `Sequential` in Things (create the tag once in Window › Tags) to work it in order. On each refresh, the project's first task (in Things' project order, across headings) with no start date and no deadline gets a start date of today, so it appears in Today. Nothing else is pulled in while it is open; when it is checked off, the next undated task is. Tasks that already have a start date or a deadline follow their own dates, and Someday tasks are skipped. If an earlier task is opened again (for example you uncheck it), the task Do Things started goes back to undated (Anytime, without its P tag), unless you've changed its date since.
 - Check a task's box to complete it in Things. It stays in its group, dim gray and struck through at the bottom, until the end of the day (tick **Hide Completed** under the searches to hide these everywhere; the setting is remembered). Uncheck it to reopen it. Completed tasks can't be dragged, and the priority rules leave them alone. Checking works even while a P tag is missing.
 - Shows deadline flags, red when overdue.
 - Click a task to edit it in place: title, notes, tags, When (Today, a date, Anytime or Someday), deadline (both picked from a calendar; choosing Someday or Anytime also removes the deadline; **Tomorrow** on the When line defers the start to tomorrow; deferring to any later date moves a deadline that is before it to that date), project or area and heading, and priority. Empty fields are added with the **+** buttons. **Save** sends everything to Things as one change and closes the card once Things confirms it; **Cancel** (or Escape) discards it. Changing the priority follows the drag rules, but a deadline you set in the card wins. **Open in Things** in the card opens the task in Things; if the task has a checklist, its progress is shown beside it (edit the checklist in Things). While a card is open, the list doesn't refresh and tasks can't be dragged.
@@ -114,6 +115,7 @@ To stop the server: `lsof -ti tcp:8765 | xargs kill`
 | `test_serve.py` | Tests for the server: missing-tag guards, opening Things lists, browser disconnects |
 | `errors.log`, `run.log` | Runtime logs (untracked) |
 | `task_order.json` | Saved order within each priority (untracked) |
+| `sequence_pulls.json` | The task Do Things started in each sequential project, so it can be undone (untracked) |
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
 
 ## Safety notes

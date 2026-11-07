@@ -8,9 +8,12 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): Records the task started in each sequential project
+  and, when an earlier task in the project is open again, returns it to
+  undated (Anytime, without its P tag).
 - v0.1.16 (2026-11-07): Sequential projects no longer hide tasks. Each
   refresh first gives every sequential project's next undated task a start
   date of today, then applies the Today rules (so it is also tagged P2).
@@ -73,6 +76,7 @@ from common import (
     get_logger,
     is_valid_task_id,
     load_order,
+    load_pulls,
     load_token,
     missing_priority_tags,
     open_things_db,
@@ -83,6 +87,7 @@ from common import (
     read_sequential_projects,
     read_task,
     save_order,
+    save_pulls,
     save_token,
     today_local,
 )
@@ -94,6 +99,7 @@ from priority_check import (
     TaskEdit,
     completed_last,
     deadline_state,
+    find_pulled,
     group_today,
     in_project_order,
     plan_completion,
@@ -101,6 +107,7 @@ from priority_check import (
     plan_move,
     plan_refresh,
     plan_sequence,
+    plan_sequence_undo,
     required_priority,
     today_counts,
     update_order,
@@ -167,21 +174,16 @@ def apply_refresh_rules(
 ) -> bool:
     """Apply the refresh rules. Returns True if a write failed.
 
-    First each sequential project's next undated task gets a start date of
-    today (plan_sequence), then every Today task, including those, gets the
-    Today rules (plan_refresh). Skipped while any P tag is missing in Things:
+    First the sequential projects are stepped (step_sequences), then every
+    Today task, including any just started, gets the Today rules (plan_refresh). Skipped while any P tag is missing in Things:
     Things silently ignores unknown tags, so the write could never be
     confirmed and would look like a token problem. Stops at the first failed
     write so a bad token does not stall every refresh.
     """
     if token is None or missing_tags:
         return False
-    with open_things_db(db_path) as conn:
-        projects = read_sequential_projects(conn)
-    pulls = [plan_sequence(tasks, today) for tasks in projects.values()]
-    for change in filter(None, pulls):
-        if not apply_change(change, token, db_path):
-            return True
+    if step_sequences(db_path, token, today):
+        return True
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, "today", today)
     for task in tasks:
@@ -189,6 +191,42 @@ def apply_refresh_rules(
         if change is not None and not apply_change(change, token, db_path):
             return True
     return False
+
+
+def step_sequences(db_path: str, token: str, today: date) -> bool:
+    """Start or undo the next task of each sequential project. Returns True if a write failed.
+
+    Each started task is recorded with the date given (sequence_pulls.json),
+    so only tasks Do Things started are ever put back to undated: when an
+    earlier task in the project is open again (plan_sequence_undo), the
+    started task returns to Anytime; otherwise the next undated task is
+    started (plan_sequence). Records that no longer apply are dropped.
+    """
+    with open_things_db(db_path) as conn:
+        projects = read_sequential_projects(conn)
+    pulls = load_pulls()
+    kept = {p: pulls[p] for p in pulls if p in projects}  # Drop projects no longer sequential or open.
+    failed = False
+    for project, tasks in projects.items():
+        pulled = find_pulled(tasks, *kept[project]) if project in kept else None
+        if pulled is None:
+            kept.pop(project, None)
+        undo = plan_sequence_undo(tasks, pulled, today) if pulled else None
+        if undo is not None:
+            if not apply_change(undo, token, db_path):
+                failed = True
+                break
+            del kept[project]
+            continue
+        start = plan_sequence(tasks, today)
+        if start is not None:
+            if not apply_change(start, token, db_path):
+                failed = True
+                break
+            kept[project] = (start.task_id, today)
+    if kept != pulls:
+        save_pulls(kept)
+    return failed
 
 
 def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:

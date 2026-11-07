@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 0.1.16
+Version: 0.1.17
 
 Change log:
+- v0.1.17 (2026-11-07): Tests for find_pulled and plan_sequence_undo.
 - v0.1.16 (2026-11-07): Sequence tests now cover plan_sequence and
   sequence_next instead of hiding.
 - v0.1.15 (2026-11-07): Tests for in_project_order and next_in_sequence.
@@ -37,6 +38,7 @@ from priority_check import (
     completed_last,
     current_priority,
     deadline_state,
+    find_pulled,
     group_today,
     in_project_order,
     plan_completion,
@@ -44,6 +46,7 @@ from priority_check import (
     plan_move,
     plan_refresh,
     plan_sequence,
+    plan_sequence_undo,
     required_priority,
     sequence_next,
     today_counts,
@@ -195,6 +198,30 @@ class SequenceTests(unittest.TestCase):
     def test_started_earlier_counts_as_in_progress(self) -> None:
         tasks = [in_project("old", "S", (0, 0, 1), start_date=YESTERDAY), in_project("next", "S", (0, 0, 2))]
         self.assertIsNone(plan_sequence(tasks, TODAY))
+
+    def test_find_pulled(self) -> None:
+        tasks = [in_project("a", "S", (0, 0, 1), start_date=TODAY)]
+        self.assertEqual(find_pulled(tasks, "a", TODAY).uuid, "a")
+        self.assertIsNone(find_pulled(tasks, "a", YESTERDAY))  # Date changed since: leave it alone.
+        self.assertIsNone(find_pulled(tasks, "gone", TODAY))   # Completed or removed.
+
+    def test_undo_when_earlier_task_reopened(self) -> None:
+        reopened = in_project("first", "S", (0, 0, 1), start_date=TODAY)
+        pulled = in_project("second", "S", (0, 0, 2), tags=["Home", "P2"], start_date=TODAY)
+        change = plan_sequence_undo([reopened, pulled], pulled, TODAY)
+        self.assertEqual((change.task_id, change.set_when, change.tags), ("second", "anytime", ["Home"]))
+        self.assertIsNone(change.set_start_date)
+
+    def test_undo_keeps_tags_without_p_tag(self) -> None:
+        reopened = in_project("first", "S", (0, 0, 1), start_date=TODAY)
+        pulled = in_project("second", "S", (0, 0, 2), tags=["Home"], start_date=TODAY)
+        self.assertIsNone(plan_sequence_undo([reopened, pulled], pulled, TODAY).tags)
+
+    def test_no_undo_while_pulled_task_is_in_progress(self) -> None:
+        pulled = in_project("second", "S", (0, 0, 2), start_date=TODAY)
+        done = in_project("first", "S", (0, 0, 1), start_date=TODAY, completed_at=1.0)
+        later = in_project("third", "S", (0, 0, 3))
+        self.assertIsNone(plan_sequence_undo([done, pulled, later], pulled, TODAY))
 
     def test_nothing_to_do(self) -> None:
         self.assertIsNone(plan_sequence([], TODAY))
