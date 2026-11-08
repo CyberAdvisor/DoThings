@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Test for the next_up flag.
 - v1.1.0 (2026-11-08): Tests for the P4 search, Next Up project queries, the
   update-project URL and project change confirmation.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
@@ -581,6 +582,21 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(read_project_tags(conn, "plain"), ["Home"])
             self.assertEqual(read_project_tags(conn, "proj1"), [])
             self.assertIsNone(read_project_tags(conn, "today1"))  # A to-do, not a project.
+
+    def test_next_up_flag(self) -> None:
+        self.add_next_up_projects()
+        with write_db(self.path) as conn:
+            # Under a heading of the Next Up project, and in the project tagged both.
+            conn.execute("INSERT INTO TMTask (uuid, title, type, status, trashed, project, \"index\") "
+                         "VALUES ('bh', 'Heading', 2, 0, 0, 'books', 1)")
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, project, heading, \"index\") "
+                f"VALUES (?, ?, 0, 0, 0, {START_ANYTIME}, ?, ?, 0)",
+                [("b2", "Book 2", None, "bh"), ("x1", "Both 1", "both", None)],
+            )
+        with open_things_db(self.path) as conn:
+            flags = {i: read_task(conn, i).next_up for i in ("b1", "b2", "x1", "today1", "today2")}
+        self.assertEqual(flags, {"b1": True, "b2": True, "x1": False, "today1": False, "today2": False})
 
     def test_project_change_confirmed_by_database(self) -> None:
         self.add_next_up_projects()

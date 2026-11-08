@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential (Sequential or Next Up) project's kind and task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Synchronized module version metadata.
 - v1.1.0 (2026-11-08): Shows each project's kind (Sequential or Next Up) and
   flags projects tagged both.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
@@ -115,7 +116,7 @@ def run() -> None:
             state = f"in progress (recorded, after {record.after or 'none'}): {recorded.title!r}"
         else:
             current = sequence_next(project_tasks, today)
-            planned = describe_change(plan_sequence(project_tasks, today, kind) or Change("", None))
+            planned = describe_change(plan_sequence(project_tasks, today) or Change("", None))
             state = f"next by order: {current.title if current else 'none'!r}; planned={planned or 'no change'}"
         print(f"- {project_tasks[0].context!r} [{label}]: {len(project_tasks)} open; {state}")
     print(f"\nToday tasks: {len(tasks)}")

@@ -2,15 +2,18 @@
 
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves, reorders, edits, completes
-and reopens tasks, opens
+and reopens tasks, resets a sequential project to one task in Today, opens
 tasks and Things' own lists in Things, and stores the Things auth token on
 first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Task detail sends sequence_project; POST
+  /api/sequence/reset/preview and /api/sequence/reset for Reset other tasks;
+  sequence starts no longer pass a kind.
 - v1.1.0 (2026-11-08): step_sequences removes Next Up from projects also tagged
   Sequential and starts a Next Up task as P4; the list response sends the
   priorities; fourth Today group and P4 search.
@@ -83,12 +86,12 @@ from priority_check import (
     plan_project_tags,
     plan_refresh,
     plan_sequence,
+    plan_sequence_reset,
     plan_sequence_undo,
     place_in_list,
     predict,
     prune_order,
     required_priority,
-    sequence_kind,
     sequence_place,
     today_counts,
     update_order,
@@ -223,8 +226,8 @@ def apply_refresh_rules(
 def step_sequences(db_path: str, token: str, today: date) -> bool:
     """Start or undo the next task of each sequential project. Returns True if a write failed.
 
-    Sequential and Next Up projects work the same way; a Next Up project's
-    task is started as P4. A project tagged both first has Next Up removed in
+    Sequential and Next Up projects work the same way (a Next Up project's
+    task then gets P4 from refresh rule 3, a Sequential one's P2). A project tagged both first has Next Up removed in
     Things (fix_sequence_tags) and is then Sequential.
 
     Each started task is recorded (sequence_pulls.json) with the date given
@@ -250,8 +253,7 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
         pulled = find_pulled(tasks, record.task, record.started_on) if record else None
         if pulled is None:
             kept.pop(project, None)
-            kind = sequence_kind(project_tags.get(project, []))
-            start = plan_sequence(tasks, today, kind) if kind else None
+            start = plan_sequence(tasks, today)
             if start is not None:
                 if not apply_change(start, token, db_path):
                     return save_and_fail(kept, pulls)
@@ -464,6 +466,7 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         task = read_task(conn, task_id)
         options = read_edit_options(conn)
         checklist = read_checklist_progress(conn, task_id)
+        sequence_projects = read_sequence_project_tags(conn)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
     detail = task_to_json(task, today)
@@ -475,6 +478,8 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         list_id=task.list_id,
         heading_id=task.heading_id,
         checklist=checklist,
+        # The project's name if it is Sequential or Next Up, so the editor offers "Reset other tasks".
+        sequence_project=task.context if task.project_id in sequence_projects else None,
     )
     return {"task": detail, "options": options, "today": today.isoformat()}
 
@@ -613,6 +618,63 @@ def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
+def plan_reset_request(body: Dict[str, Any]) -> Tuple[Task, List[Change], str, List[str]]:
+    """Validate a "Reset other tasks" request and return (task, changes, db_path, missing P tags).
+
+    The task must be open and in an open Sequential or Next Up project; the
+    changes come from plan_sequence_reset.
+    """
+    task, db_path, missing = load_task(body.get("id"))
+    if task.completed:
+        raise ApiError(409, "Uncheck the task before resetting its project.")
+    with open_things_db(db_path) as conn:
+        projects = read_sequential_projects(conn)
+    if task.project_id not in projects:
+        raise ApiError(409, "This task isn't in a Sequential or Next Up project.")
+    return task, plan_sequence_reset(projects[task.project_id], task, today_local()), db_path, missing
+
+
+def preview_reset(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Show what "Reset other tasks" would do, without writing anything.
+
+    Returns the project's name and the tasks that would go back to Anytime.
+    """
+    task, changes, db_path, _ = plan_reset_request(body)
+    returned = [c.task_id for c in changes if c.task_id != task.uuid]
+    with open_things_db(db_path) as conn:
+        titles = {i: read_task(conn, i).title for i in returned}
+    return {"project": task.context, "returned": [{"id": i, "title": titles[i]} for i in returned]}
+
+
+def reset_sequence(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Leave the task as its sequential project's only task in Today.
+
+    The task is recorded as the one in progress (with no task it followed, so
+    unchecking another task never undoes it) once its own change, if any, is
+    confirmed; then every other task plan_sequence_reset names goes back to
+    Anytime. Stops at the first change Things doesn't confirm.
+    """
+    token = load_token()
+    if token is None:
+        raise ApiError(409, "The Things auth token is not set.")
+    task, changes, db_path, missing = plan_reset_request(body)
+    if missing:
+        # Things would silently drop unknown tags, so the changes could never be confirmed.
+        raise ApiError(409, f"Create the {missing[0]} tag in Things first (Window › Tags), then try again.")
+    today = today_local()
+    keep_change = changes[0] if changes and changes[0].task_id == task.uuid else None
+    if keep_change is not None and not apply_change(keep_change, token, db_path):
+        return {"ok": False, "write_failed": True}
+    pulls = load_pulls()
+    pulls[task.project_id] = Pull(task.uuid, today if keep_change else task.start_date, None)
+    save_pulls(pulls)
+    others = changes[1:] if keep_change else changes
+    for change in others:
+        if not apply_change(change, token, db_path):
+            return {"ok": False, "write_failed": True}
+    return {"ok": True, "returned": len(others)}
+
+
 def reorder_tasks(body: Dict[str, Any]) -> Dict[str, Any]:
     """Save a new order within one priority (no change in Things)."""
     priority, ids = parse_order(body)
@@ -661,6 +723,8 @@ POST_ROUTES = {
     "/api/edit": edit_task,
     "/api/edit/preview": preview_edit,
     "/api/refresh/retry": retry_refresh,
+    "/api/sequence/reset": reset_sequence,
+    "/api/sequence/reset/preview": preview_reset,
     "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,

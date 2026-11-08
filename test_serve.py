@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Tests for Reset other tasks (detail, preview, reset, due-
+  only kept task, failures, guards); Next Up start now tagged P4 by rule 3.
 - v1.1.0 (2026-11-08): Tests for Next Up projects (P4 start, Next Up group and
   search, tag removal, pause, missing P4) and moves to P4; P4 tag in fixtures.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
@@ -369,13 +371,18 @@ class NextUpTests(MockThingsTestCase):
 
     def test_next_up_task_started_as_p4_and_shown_in_its_group(self) -> None:
         serve.list_response("today")
-        self.assertEqual(self.starts(), {"b1": ["P4"], "x1": None})
+        self.assertEqual(self.starts(), {"b1": None, "x1": None})
         with write_db(self.db_path) as conn:  # As Things applied the start.
             conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b1'", (pack_things_date(TODAY),))
-            conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
         self.apply_change.reset_mock()
-        response = serve.list_response("today")
+        serve.list_response("today")
         self.assertEqual(self.starts(), {"x1": None})  # b1 is in progress; nothing else from Books.
+        tagged = {c[0][0].task_id: c[0][0].tags for c in self.apply_change.call_args_list}
+        self.assertEqual(tagged["b1"], ["P4"])  # Refresh rule 3: a Next Up task becomes P4.
+        self.assertIsNone(tagged["x1"])  # Started; the project tagged both is Sequential.
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
+        response = serve.list_response("today")
         self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4"])
         last = response["groups"][-1]
         self.assertEqual((last["priority"], last["label"]), ("P4", "Next Up"))
@@ -407,6 +414,70 @@ class NextUpTests(MockThingsTestCase):
             conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b2'", (pack_things_date(TODAY),))
         self.assertEqual(serve.move_task({"id": "b2", "priority": "P4", "order": ["b2"]}), {"ok": True})
         self.assertEqual(self.apply_change.call_args[0][0].tags, ["P4"])
+
+
+class SequenceResetTests(MockThingsTestCase):
+    """Reset other tasks: the chosen task stays the only one of its project in Today."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3", "P4", "Next Up", "Home")
+        today = pack_things_date(TODAY)
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") "
+                         "VALUES ('books', 'Books', 1, 0, 0, 0)")
+            conn.execute("INSERT INTO TMTaskTag VALUES ('books', 'Next Up')")
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, deadline, project, "
+                f"\"index\") VALUES (?, ?, 0, 0, 0, {START_ANYTIME}, ?, ?, 'books', ?)",
+                [("b1", "Book 1", today, None, 1), ("b2", "Book 2", today, None, 2),
+                 ("b3", "Book 3", today, today, 3), ("b4", "Book 4", None, None, 4)],
+            )
+            conn.executemany("INSERT INTO TMTaskTag VALUES (?, ?)", [("b1", "P4"), ("b1", "Home"), ("b2", "P4")])
+        save_pulls({"books": Pull("b1", TODAY, None)}, self.pulls_path)
+
+    def test_detail_offers_reset_only_in_sequential_projects(self) -> None:
+        self.assertEqual(serve.task_detail("b2")["task"]["sequence_project"], "Books")
+        self.assertIsNone(serve.task_detail("task1")["task"]["sequence_project"])
+
+    def test_preview_writes_nothing(self) -> None:
+        preview = serve.preview_reset({"id": "b2"})
+        # b3 has a deadline and b4 isn't in Today, so only b1 goes back.
+        self.assertEqual(preview, {"project": "Books", "returned": [{"id": "b1", "title": "Book 1"}]})
+        self.apply_change.assert_not_called()
+
+    def test_reset_keeps_chosen_task_and_records_it(self) -> None:
+        self.assertEqual(serve.reset_sequence({"id": "b2"}), {"ok": True, "returned": 1})
+        change = self.apply_change.call_args[0][0]
+        self.assertEqual((change.task_id, change.set_when, change.tags), ("b1", "anytime", ["Home"]))
+        self.assertEqual(load_pulls(self.pulls_path), {"books": Pull("b2", TODAY, None)})
+
+    def test_kept_task_due_only_is_started_first(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET startDate = NULL WHERE uuid = 'b3'")
+        serve.reset_sequence({"id": "b3"})
+        sent = [(c[0][0].task_id, c[0][0].set_start_date, c[0][0].set_when) for c in self.apply_change.call_args_list]
+        self.assertEqual(sent, [("b3", TODAY, None), ("b1", None, "anytime"), ("b2", None, "anytime")])
+        self.assertEqual(load_pulls(self.pulls_path), {"books": Pull("b3", TODAY, None)})
+
+    def test_unconfirmed_change_reported(self) -> None:
+        self.apply_change.return_value = False
+        self.assertEqual(serve.reset_sequence({"id": "b2"}), {"ok": False, "write_failed": True})
+
+    def test_refused_requests(self) -> None:
+        for body, message in (({"id": "task1"}, "isn't in a Sequential or Next Up project"),
+                              ({"id": "nosuch"}, "Task not found")):
+            with self.subTest(body=body), self.assertRaises(serve.ApiError) as raised:
+                serve.reset_sequence(body)
+            self.assertIn(message, raised.exception.message)
+        with write_db(self.db_path) as conn:
+            conn.execute("DELETE FROM TMTag WHERE title = 'P3'")
+        with self.assertRaises(serve.ApiError) as raised:
+            serve.reset_sequence({"id": "b2"})
+        self.assertIn("Create the P3 tag", raised.exception.message)
+        with mock.patch.object(serve, "load_token", return_value=None), self.assertRaises(serve.ApiError):
+            serve.reset_sequence({"id": "b2"})
+        self.apply_change.assert_not_called()
 
 
 class CompletionTests(MockThingsTestCase):

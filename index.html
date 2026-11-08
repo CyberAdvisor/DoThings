@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.1.0
+  Version: 1.2.0
 
   Change log:
+  - v1.2.0 (2026-11-08): "Reset other tasks" in the editor of a task in a
+    Sequential or Next Up project: shows what would go back to Anytime, with
+    a reminder to check the project order, then applies it on Reset.
   - v1.1.0 (2026-11-08): P4 · Next Up search in the sidebar; Today's Next Up
     group comes from the server; the editor's priority choices and the
     missing-tag message use the priorities the server sends.
@@ -118,7 +121,7 @@
   }
   .task:hover { background: var(--hover); }
   .task.dragging { opacity: 0.4; }
-  .task.saving { opacity: 0.6; } /* Shown as changed; Things hasn't confirmed it yet. */
+  .task.saving, .editor.saving { opacity: 0.6; } /* Shown as changed; Things hasn't confirmed it yet. */
   /* Completion checkbox, a rounded square like Things. */
   .check {
     width: 16px; height: 16px; flex-shrink: 0; border-radius: 4px; padding: 0;
@@ -199,6 +202,8 @@
   .picker .grid button.today { color: var(--accent); font-weight: 700; }
   .picker .grid button.chosen { background: var(--accent); color: #fff; }
   .editor .checklist { color: var(--muted); font-size: 12px; }
+  .editor .reset { display: flex; flex-direction: column; gap: 6px; }
+  .editor .reset-buttons { display: flex; gap: 8px; }
   .editor .ed-status { color: var(--red); font-size: 12px; margin-left: 26px; min-height: 0; }
   .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
   /* Setup screen */
@@ -691,6 +696,7 @@ async function startEdit(row, id) {
       pickerMonth: null,  // First day of the month the picker shows (YYYY-MM-01).
       preview: null,      // The server's preview of the edit (see refreshPreview); null until a date or priority changes.
       previewSeq: 0,      // Numbers preview requests, so only the newest answer is shown.
+      reset: null,        // The server's preview of "Reset other tasks" while its confirm line is shown.
       touched: { when: false, deadline: false }, // Dates chosen here (not just loaded).
       draft: {
         title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
@@ -878,6 +884,13 @@ function buildEditor() {
   things.type = "button";
   things.onclick = () => openTask(task.id);
   foot.append(save, cancel, things);
+  if (task.sequence_project && !locked) {
+    const reset = el("button", "secondary", "Reset other tasks");
+    reset.type = "button";
+    reset.title = `Keep only this task of ${task.sequence_project} in Today`;
+    reset.onclick = previewReset;
+    foot.append(reset);
+  }
   if (task.checklist.total) {
     // The checklist is edited in Things (replacing it from here would reset ticks).
     const checklist = el("span", "checklist",
@@ -901,7 +914,9 @@ function buildEditor() {
     }
     foot.append(adders);
   }
-  card.append(foot, el("div", "ed-status"));
+  card.append(foot);
+  if (state.edit.reset) card.append(resetConfirm(state.edit.reset));
+  card.append(el("div", "ed-status"));
   return card;
 }
 
@@ -1130,6 +1145,70 @@ function placeRow(card, preview) {
     card.replaceWith(row);
   }
   return row;
+}
+
+// Reminder shown before and after a reset: the returned tasks keep their place.
+const RESET_ORDER_NOTE = "When this task is done, the next one started is the first undated task in " +
+  "project order, so check the project's order in Things and correct it if needed.";
+
+/** Ask the server what "Reset other tasks" would do, and show it in the editor to confirm. */
+async function previewReset() {
+  try {
+    state.edit.reset = await api("/api/sequence/reset/preview", { id: state.edit.task.id });
+    redrawEditor();
+  } catch (error) {
+    editorMessage(error.message);
+  }
+}
+
+/** Build the confirm line for "Reset other tasks" from the server's preview. */
+function resetConfirm(preview) {
+  const box = el("div", "note reset");
+  const count = preview.returned.length;
+  if (!count) {
+    box.append(el("div", "", `No other task in ${preview.project} is in Today. Nothing to reset.`));
+  } else {
+    const titles = preview.returned.map((t) => `"${t.title}"`).join(", ");
+    const tasks = count === 1 ? "1 other task" : `${count} other tasks`;
+    box.append(el("div", "",
+      `Keep this task in Today. ${tasks} in ${preview.project} go${count === 1 ? "es" : ""} back to Anytime: ` +
+      `${titles}. ${RESET_ORDER_NOTE}`));
+  }
+  const buttons = el("div", "reset-buttons");
+  if (count) {
+    const confirm = el("button", "", "Reset");
+    confirm.type = "button";
+    confirm.onclick = () => applyReset(preview);
+    buttons.append(confirm);
+  }
+  const cancel = el("button", "secondary", count ? "Cancel" : "OK");
+  cancel.type = "button";
+  cancel.onclick = () => { state.edit.reset = null; redrawEditor(); };
+  buttons.append(cancel);
+  box.append(buttons);
+  return box;
+}
+
+/**
+ * Apply "Reset other tasks" in the background like any other change. The
+ * card and the tasks going back to Anytime are dimmed and disabled until
+ * Things confirms; the list is then redrawn (enqueue), which closes the card.
+ * Unsaved edits in the card are discarded.
+ */
+function applyReset(preview) {
+  const { task, card } = state.edit;
+  state.edit = null;
+  card.classList.add("saving");
+  for (const control of card.querySelectorAll("input, textarea, select, button")) control.disabled = true;
+  for (const { id } of preview.returned) {
+    const row = document.querySelector(`.task[data-id="${CSS.escape(id)}"]`);
+    if (row) { row.classList.add("saving"); row.draggable = false; }
+  }
+  enqueue(null, "the reset", async () => {
+    const result = await api("/api/sequence/reset", { id: task.id });
+    if (result.ok) setStatus(`Reset ${preview.project}. ${RESET_ORDER_NOTE}`);
+    return result;
+  });
 }
 
 /** Close the editor without saving and redraw the list. */

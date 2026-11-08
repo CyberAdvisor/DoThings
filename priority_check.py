@@ -7,9 +7,13 @@ edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides what kind of sequence a project tagged Sequential or
 Next Up is, and which task such a project starts next.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Untagged Today task of a Next Up project is P4
+  (Task.next_up); plan_sequence no longer tags (rule 3 does);
+  plan_sequence_reset for Reset other tasks, sharing _back_to_anytime with the
+  undo.
 - v1.1.0 (2026-11-08): P4 (Next Up) priority; Next Up project kind
   (sequence_kind), ProjectChange and plan_project_tags; plan_sequence starts a
   Next Up task as P4; P4 search in place_in_list.
@@ -30,12 +34,12 @@ PRIORITIES = ("P1", "P2", "P3", "P4")
 PRIORITY_LABELS = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up"}
 
 # Project tags in Things that make a project release its tasks one at a time.
-# A Sequential project's task becomes P2 in Today (refresh rule 3); a Next Up
-# project's task is started as P4. A project tagged both is Sequential.
+# An untagged Today task of a Next Up project becomes P4 (refresh rule 3);
+# any other untagged Today task, Sequential ones included, becomes P2. A
+# project tagged both is Sequential.
 SEQUENTIAL_TAG = "Sequential"
 NEXT_UP_TAG = "Next Up"
 SEQUENCE_TAGS = (SEQUENTIAL_TAG, NEXT_UP_TAG)
-SEQUENCE_PRIORITY = {NEXT_UP_TAG: "P4"}
 
 
 @dataclass
@@ -59,6 +63,7 @@ class Task:
     project_rank: Tuple[int, int, int] = (0, 0, 0)
     repeating: bool = False  # A copy of a repeating to-do (shown with a ↻ icon).
     has_checklist: bool = False
+    next_up: bool = False  # In a project tagged Next Up and not Sequential: untagged, it is P4.
 
     @property
     def completed(self) -> bool:
@@ -146,11 +151,11 @@ def required_priority(task: Task, today: date) -> str:
     """Return the priority a Today task must carry under the refresh rules.
 
     Rules, in order: overdue or due today -> P1; otherwise the highest P tag
-    it already has; otherwise P2.
+    it already has; otherwise P4 for a task of a Next Up project, else P2.
     """
     if task.deadline is not None and task.deadline <= today:
         return "P1"
-    return current_priority(task.tags) or "P2"
+    return current_priority(task.tags) or ("P4" if task.next_up else "P2")
 
 
 def _with_priority(tags: List[str], priority: str) -> List[str]:
@@ -430,20 +435,38 @@ def plan_project_tags(project_id: str, project_tags: List[str]) -> Optional[Proj
     return ProjectChange(project_id, [t for t in project_tags if t != NEXT_UP_TAG])
 
 
-def plan_sequence(project_tasks: Iterable[Task], today: date, kind: str = SEQUENTIAL_TAG) -> Optional[Change]:
+def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change]:
     """Return the change that puts a sequential project's next task in Today, if needed.
 
     The task in progress (sequence_next) gets a start date of today when it
     has none. While it is open nothing else is pulled in; once it is done the
-    next undated task is. A Next Up project's task is tagged P4 in the same
-    write; a Sequential project's task keeps its tags (refresh rule 3 makes it P2).
+    next undated task is. Its P tag comes from refresh rule 3 in the same
+    refresh: P4 in a Next Up project, P2 in a Sequential one.
     """
     task = sequence_next(project_tasks, today)
     if task is None or task.start_date is not None:
         return None
-    priority = SEQUENCE_PRIORITY.get(kind)
-    tags = _with_priority(task.tags, priority) if priority else None
-    return Change(task_id=task.uuid, tags=tags, set_start_date=today)
+    return Change(task_id=task.uuid, tags=None, set_start_date=today)
+
+
+def plan_sequence_reset(project_tasks: Iterable[Task], keep: Task, today: date) -> List[Change]:
+    """Return the changes that leave `keep` as its sequential project's only task in Today.
+
+    Every other open task of the project that is in Today because of its start
+    date (today or earlier) goes back to Anytime without its P tags. Tasks
+    with a deadline follow their own dates and are left alone, as are tasks
+    starting later, Someday and completed tasks. If `keep` has no start date
+    (it is in Today only because of its deadline) it gets a start date of
+    today, as refresh rule 4 would give it; that change comes first.
+    """
+    changes = []
+    if keep.start_date is None:
+        changes.append(Change(task_id=keep.uuid, tags=None, set_start_date=today))
+    for task in sorted(project_tasks, key=lambda t: t.project_rank):
+        started = task.start_date is not None and task.start_date <= today
+        if task.uuid != keep.uuid and started and task.deadline is None and not task.completed:
+            changes.append(_back_to_anytime(task))
+    return changes
 
 
 def find_pulled(project_tasks: Iterable[Task], task_id: str, started_on: date) -> Optional[Task]:
@@ -467,9 +490,14 @@ def plan_sequence_undo(project_tasks: Iterable[Task], pulled: Task, after_id: Op
     """
     if after_id is None or not any(t.uuid == after_id and not t.completed for t in project_tasks):
         return None
-    other_tags = [t for t in pulled.tags if t not in PRIORITIES]
-    tags = other_tags if len(other_tags) != len(pulled.tags) else None
-    return Change(task_id=pulled.uuid, tags=tags, set_when="anytime")
+    return _back_to_anytime(pulled)
+
+
+def _back_to_anytime(task: Task) -> Change:
+    """Return the change that puts `task` in Anytime (no start date) without its P tags."""
+    other_tags = [t for t in task.tags if t not in PRIORITIES]
+    tags = other_tags if len(other_tags) != len(task.tags) else None  # None: no P tag to remove.
+    return Change(task_id=task.uuid, tags=tags, set_when="anytime")
 
 
 def completed_last(tasks: List[Task]) -> List[Task]:

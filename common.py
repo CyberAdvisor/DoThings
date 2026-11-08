@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Every task read carries next_up (project tagged Next Up
+  and not Sequential).
 - v1.1.0 (2026-11-08): Reads Next Up projects with the Sequential ones, and
   project tags (read_sequence_project_tags, read_project_tags);
   things:///update-project URL and confirmed project tag change
@@ -35,7 +37,7 @@ from collections import Counter
 from datetime import date, datetime
 from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from priority_check import PRIORITIES, SEQUENCE_TAGS, Change, ProjectChange, Task
+from priority_check import NEXT_UP_TAG, PRIORITIES, SEQUENCE_TAGS, SEQUENTIAL_TAG, Change, ProjectChange, Task
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
@@ -172,8 +174,23 @@ def open_things_db(path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _project_has_tag(tag: str) -> str:
+    """Return SQL that is true when the to-do's project (directly or via its heading) has `tag`.
+
+    `tag` is one of this module's own tag constants, never user input; quotes
+    are doubled anyway so the literal stays valid SQL.
+    """
+    literal = "'" + tag.replace("'", "''") + "'"
+    return (
+        "EXISTS (SELECT 1 FROM TMTaskTag pt JOIN TMTag pg ON pg.uuid = pt.tags "
+        f"WHERE pt.tasks = COALESCE(t.project, h.project) AND pg.title = {literal})"
+    )
+
+
 # Columns shared by every task query. Tags are concatenated with the ASCII unit
-# separator (char 31) because tag names may contain commas.
+# separator (char 31) because tag names may contain commas. `next_up` marks a
+# to-do of a project tagged Next Up and not Sequential (tagged both, it is
+# Sequential); refresh rule 3 makes such a to-do P4.
 _TASK_SELECT = f"""
 SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
@@ -181,6 +198,7 @@ SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.s
        t.rt1_repeatingTemplate IS NOT NULL AS repeating,
        EXISTS (SELECT 1 FROM TMChecklistItem ci WHERE ci.task = t.uuid) AS has_checklist,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
+       {_project_has_tag(NEXT_UP_TAG)} AND NOT {_project_has_tag(SEQUENTIAL_TAG)} AS next_up,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
          WHERE tt.tasks = t.uuid) AS tag_titles
@@ -226,6 +244,7 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         project_rank=_project_rank(row["heading_id"], row["heading_index"], row["task_index"]),
         repeating=bool(row["repeating"]),
         has_checklist=bool(row["has_checklist"]),
+        next_up=bool(row["next_up"]),
     )
 
 

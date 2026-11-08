@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.1.0
+Version: 1.2.0
 
 Change log:
+- v1.2.0 (2026-11-08): Tests for P4 by default in Next Up projects and for
+  plan_sequence_reset.
 - v1.1.0 (2026-11-08): Tests for P4, Next Up projects and the project tag
   change.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
@@ -36,6 +38,7 @@ from priority_check import (
     plan_project_tags,
     plan_refresh,
     plan_sequence,
+    plan_sequence_reset,
     plan_sequence_undo,
     predict,
     prune_order,
@@ -264,18 +267,54 @@ class NextUpTests(unittest.TestCase):
         self.assertIsNone(plan_project_tags("proj", [NEXT_UP_TAG]))
         self.assertIsNone(plan_project_tags("proj", [SEQUENTIAL_TAG]))
 
-    def test_next_up_task_started_as_p4(self) -> None:
-        tasks = [in_project("first", "N", (0, 0, 1), tags=["Books", "P2"]), in_project("second", "N", (0, 0, 2))]
-        change = plan_sequence(tasks, TODAY, NEXT_UP_TAG)
-        self.assertEqual((change.task_id, change.set_start_date, change.tags), ("first", TODAY, ["Books", "P4"]))
-        self.assertTrue(change.is_satisfied_by(in_project("first", "N", (0, 0, 1), tags=["P4", "Books"], start_date=TODAY)))
-        # A Sequential project's task keeps its tags (refresh rule 3 makes it P2).
-        self.assertIsNone(plan_sequence(tasks, TODAY, SEQUENTIAL_TAG).tags)
+    def test_untagged_next_up_task_is_p4(self) -> None:
+        task = make_task(start_date=TODAY)
+        task.next_up = True
+        self.assertEqual(required_priority(task, TODAY), "P4")
+        self.assertEqual(plan_refresh(task, TODAY).tags, ["P4"])
+        task.tags = ["P2"]  # Moved by hand: the tag wins.
+        self.assertEqual(required_priority(task, TODAY), "P2")
+        task.deadline = TODAY
+        self.assertEqual(required_priority(task, TODAY), "P1")
+        self.assertEqual(required_priority(make_task(start_date=TODAY), TODAY), "P2")  # Not Next Up.
 
     def test_undo_removes_p4(self) -> None:
         reopened = in_project("first", "N", (0, 0, 9), start_date=TODAY)
         pulled = in_project("second", "N", (0, 0, 2), tags=["Books", "P4"], start_date=TODAY)
         self.assertEqual(plan_sequence_undo([pulled, reopened], pulled, "first").tags, ["Books"])
+
+
+class SequenceResetTests(unittest.TestCase):
+    """Reset other tasks: only the chosen task of a sequential project stays in Today."""
+
+    def test_other_started_tasks_go_back_to_anytime(self) -> None:
+        keep = in_project("keep", "S", (0, 0, 3), tags=["P4"], start_date=TODAY)
+        done = in_project("done", "S", (0, 0, 0), start_date=TODAY, completed_at=1.0)
+        someday = in_project("someday", "S", (0, 0, 7))
+        someday.someday = True
+        tasks = [
+            in_project("later", "S", (0, 0, 2), tags=["Books", "P4"], start_date=YESTERDAY),
+            in_project("first", "S", (0, 0, 1), start_date=TODAY),
+            keep, done, someday,
+            in_project("due", "S", (0, 0, 4), start_date=TODAY, deadline=TOMORROW),  # Has a deadline.
+            in_project("future", "S", (0, 0, 5), start_date=TOMORROW),
+            in_project("undated", "S", (0, 0, 6)),
+        ]
+        changes = plan_sequence_reset(tasks, keep, TODAY)
+        # In project order; P tags removed (None when there were none to remove).
+        self.assertEqual([(c.task_id, c.set_when, c.tags) for c in changes],
+                         [("first", "anytime", None), ("later", "anytime", ["Books"])])
+
+    def test_kept_task_due_only_gets_start_date(self) -> None:
+        keep = in_project("keep", "S", (0, 0, 2), deadline=YESTERDAY)
+        other = in_project("other", "S", (0, 0, 1), start_date=TODAY)
+        changes = plan_sequence_reset([keep, other], keep, TODAY)
+        self.assertEqual([(c.task_id, c.set_start_date, c.set_when) for c in changes],
+                         [("keep", TODAY, None), ("other", None, "anytime")])
+
+    def test_nothing_to_reset(self) -> None:
+        keep = in_project("keep", "S", (0, 0, 1), start_date=TODAY)
+        self.assertEqual(plan_sequence_reset([keep, in_project("next", "S", (0, 0, 2))], keep, TODAY), [])
 
 
 class TodayCountsTests(unittest.TestCase):

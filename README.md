@@ -24,15 +24,16 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 - **Priority rules kept for you.** On every refresh (page load, returning to the window, and every 60 seconds):
   1. A task due today or overdue is tagged P1.
   2. A task with more than one P tag keeps only the highest.
-  3. A Today task with no P tag is tagged P2.
+  3. A Today task with no P tag is tagged P2, or P4 if it belongs to a Next Up project.
   4. A task with no start date that is due today or overdue gets a start date of today, so it is in Things' Today too.
 - **Move tasks between priorities.** Dragging a task to another group replaces its P tag.
   - **Moving into P1** gives it a deadline of today if it has none.
   - **Moving out of P1** removes a deadline of today or earlier. If the task was in Today only because of that deadline, it gets a start date of today so it stays in Today.
   - **A deadline after today** is always kept.
 - **Sequential projects.** Tag a Things project `Sequential` and Do Things brings its tasks into Today one at a time, in project order. When you check one off, the next one starts. Each such task shows its place, for example "Seq Project · task 2 of 5". If you uncheck a task, the task it started goes back.
-- **Next Up projects.** Next Up is for lower-priority projects that don't need immediate action but that you want to be reminded of, such as books to read, shows to watch or chores to do. Tag a Things project `Next Up` and it works like a Sequential project, one task at a time in project order. Each task it starts goes into a fourth Today group, **Next Up (P4)**, below Follow Up. If a project is tagged both `Sequential` and `Next Up`, Sequential wins and Do Things removes the `Next Up` tag from the project.
+- **Next Up projects.** Next Up is for lower-priority projects that don't need immediate action but that you want to be reminded of, such as books to read, shows to watch or chores to do. Tag a Things project `Next Up` and it works like a Sequential project, one task at a time in project order. Each task it starts goes into a fourth Today group, **Next Up (P4)**, below Follow Up. So does any other task of a Next Up project that is in Today without a P tag, such as one you dated yourself. If a project is tagged both `Sequential` and `Next Up`, Sequential wins and Do Things removes the `Next Up` tag from the project.
 - **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline. **Hide Completed** hides tasks checked off today, in every view.
+- **Reset a Sequential or Next Up project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
 - **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
 - **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Dark and Light appearance.
@@ -193,7 +194,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - A change counts as done only after it appears in Things' data. The saved order is updated only after a move is confirmed.
 - If an automatic update isn't confirmed, automatic updates pause until you click **Retry**, save a new token or restart Do Things. The failure is logged once. Changes you make yourself are still sent, each with its own message if it fails.
 - Tags are written as a full list, so your other tags are kept. A tag containing a comma can't be written safely, so such a task is logged and skipped.
-- In a Sequential or Next Up project, Do Things only ever undoes a task it started itself, and not if you've changed that task's date since.
+- In a Sequential or Next Up project, Do Things only ever undoes a task it started itself, and not if you've changed that task's date since. **Reset other tasks** changes other tasks of the project only when you click **Reset**, after showing which ones.
 - The only change Do Things makes to a project is removing `Next Up` from a project also tagged `Sequential`. Its other tags are kept, and the change is confirmed like any other.
 - The server listens only on your Mac (`127.0.0.1`). It accepts only requests addressed to itself, and only accepts changes carrying a header that other websites can't add.
 - The auth token is never written to logs.
