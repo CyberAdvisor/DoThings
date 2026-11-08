@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): Tests for the trash AppleScript command and move_to_trash.
 - v1.4.0 (2026-11-08): Test that task reads carry the reminder time.
 - v1.3.1 (2026-11-08): Tests for the reminder time format and the raw reminder read.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
@@ -47,6 +48,7 @@ from common import (
     THINGS_LISTS,
     apply_project_change,
     build_show_url,
+    build_trash_command,
     build_update_project_url,
     build_update_url,
     count_completed,
@@ -58,6 +60,7 @@ from common import (
     load_pulls,
     load_token,
     missing_priority_tags,
+    move_to_trash,
     open_things_db,
     open_things_url,
     pack_things_date,
@@ -70,6 +73,7 @@ from common import (
     read_sequence_project_tags,
     read_sequential_projects,
     read_task,
+    run_trash_script,
     save_order,
     save_pulls,
     save_token,
@@ -226,6 +230,33 @@ class ThingsTimeTests(unittest.TestCase):
         self.assertIsNone(unpack_things_time(-1))
         self.assertIsNone(unpack_things_time(25 << 26))  # Hour 25.
         self.assertIsNone(unpack_things_time((9 << 26) | (61 << 20)))  # Minute 61.
+
+
+class TrashScriptTests(unittest.TestCase):
+    """The AppleScript command that moves a to-do to Things' Trash."""
+
+    def test_id_is_an_argument_not_part_of_the_script(self) -> None:
+        command = build_trash_command("Abc-123")
+        self.assertEqual(command[0], "osascript")
+        self.assertEqual(command[-1], "Abc-123")
+        script = [part for flag, part in zip(command[1:-1:2], command[2:-1:2]) if flag == "-e"]
+        self.assertEqual(len(script) * 2, len(command) - 2)  # Only -e pairs between osascript and the id.
+        self.assertNotIn("Abc-123", "\n".join(script))
+        self.assertIn('delete to do id (item 1 of argv)', "\n".join(script))
+
+    def test_invalid_id_refused(self) -> None:
+        for task_id in ("", "a b", 'x" & quit', "a" * 65):
+            with self.subTest(task_id=task_id), self.assertRaises(ValueError):
+                build_trash_command(task_id)
+
+    def test_failure_logged_with_osascript_error(self) -> None:
+        denied = subprocess.CalledProcessError(1, ["osascript"], stderr="Not authorized to send Apple events to Things3. (-1743)\n")
+        for failure, logged in ((denied, "Not authorized"), (subprocess.TimeoutExpired(["osascript"], 10), "timed out")):
+            with self.subTest(logged=logged):
+                with mock.patch("common.subprocess.run", side_effect=failure), \
+                        self.assertLogs("dothings", level="ERROR") as logs:
+                    self.assertFalse(run_trash_script("A1"))
+                self.assertIn(logged, "\n".join(logs.output))
 
 
 class UrlTests(unittest.TestCase):
@@ -647,6 +678,23 @@ class DatabaseTests(unittest.TestCase):
             with mock.patch("common.open_things_url", side_effect=things_applies) as opened:
                 self.assertTrue(apply_project_change(change, "t", self.path))
         self.assertTrue(opened.call_args[0][0].startswith("things:///update-project?"))
+
+    def test_move_to_trash_confirmed_by_database(self) -> None:
+        def things_trashes(command: list, **kwargs: object) -> subprocess.CompletedProcess:
+            with write_db(self.path) as conn:
+                conn.execute("UPDATE TMTask SET trashed = 1 WHERE uuid = 'today1'")
+            return subprocess.CompletedProcess(command, 0)
+
+        with mock.patch("common.CONFIRM_POLL_SECONDS", 0.01), mock.patch("common.CONFIRM_TIMEOUT_SECONDS", 0.2), \
+                mock.patch("common.get_logger"):
+            with mock.patch("common.subprocess.run", return_value=subprocess.CompletedProcess([], 0)):
+                self.assertFalse(move_to_trash("today1", self.path))  # Things didn't trash it.
+            with mock.patch("common.subprocess.run", side_effect=things_trashes) as ran:
+                self.assertTrue(move_to_trash("today1", self.path))
+            self.assertEqual(ran.call_args[0][0], build_trash_command("today1"))
+            with mock.patch("common.subprocess.run") as never:
+                self.assertFalse(move_to_trash("bad id!", self.path))  # Refused before osascript runs.
+            never.assert_not_called()
 
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:

@@ -7,9 +7,10 @@ would make, plus each sequential (Sequential or Next Up) project's kind and task
 and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): Synchronized module version metadata.
 - v1.4.0 (2026-11-08): reminderTime is a required column (the task queries read it).
 - v1.3.1 (2026-11-08): Prints each Today task's reminder time, raw and decoded,
   and a summary line, to check the reminder format against Things.

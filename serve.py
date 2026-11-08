@@ -2,15 +2,16 @@
 
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves, reorders, edits, completes
-and reopens tasks, resets a sequential project to one task in Today, opens
+and reopens tasks, moves tasks to Things' Trash, resets a sequential project to one task in Today, opens
 tasks and Things' own lists in Things, and stores the Things auth token on
 first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): POST /api/trash moves an open task to Things' Trash.
 - v1.4.0 (2026-11-08): Rows and the editor's When carry the reminder time
   (reminder_label, e.g. "2:30 PM"); the edit preview leaves it out when When changes.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
@@ -59,6 +60,7 @@ from common import (
     load_pulls,
     load_token,
     missing_priority_tags,
+    move_to_trash,
     open_things_db,
     open_things_url,
     read_checklist_progress,
@@ -461,6 +463,20 @@ def complete_task(body: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
+def trash_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Move an open task to Things' Trash (the user confirmed it in the editor).
+
+    Uses AppleScript, so it needs no auth token; it needs the Automation
+    permission instead, and reports `write_failed` if Things doesn't confirm.
+    """
+    task, db_path, _ = load_task(body.get("id"))
+    if task.completed:
+        raise ApiError(409, "Completed tasks can't be moved to the Trash from Do Things.")
+    if not move_to_trash(task.uuid, db_path):
+        return {"ok": False, "write_failed": True}
+    return {"ok": True}
+
+
 def when_json(task: Task, today: date) -> Dict[str, Optional[str]]:
     """Describe a task's When for the edit view: kind today/date/anytime/someday, the date and reminder time."""
     reminder = reminder_label(task.reminder)
@@ -740,6 +756,7 @@ def retry_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
 POST_ROUTES = {
     "/api/move": move_task,
     "/api/complete": complete_task,
+    "/api/trash": trash_task,
     "/api/edit": edit_task,
     "/api/edit/preview": preview_edit,
     "/api/refresh/retry": retry_refresh,

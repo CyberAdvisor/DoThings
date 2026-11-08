@@ -34,7 +34,7 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 - **Next Up projects.** Next Up is for lower-priority projects that don't need immediate action but that you want to be reminded of, such as books to read, shows to watch or chores to do. Tag a Things project `Next Up` and it works like a Sequential project, one task at a time in project order. Each task it starts goes into a fourth Today group, **Next Up (P4)**, below Follow Up. So does any other task of a Next Up project that is in Today without a P tag, such as one you dated yourself. If a project is tagged both `Sequential` and `Next Up`, Sequential wins and Do Things removes the `Next Up` tag from the project.
 - **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
 - **Reset a Sequential or Next Up project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
-- **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Open in Things** handles everything else.
+- **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Move to Trash** in the same card moves an open task to Things' Trash after you confirm it (put it back from the Trash in Things if needed). **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
 - **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
 - **Things' other lists one click away.** Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open in Things. The sidebar shows the Inbox count and Today's due and open counts, as in Things.
@@ -80,6 +80,9 @@ The commands in this guide assume that location. If you put it elsewhere, change
    - If you missed or declined the prompt, open **System Settings › Privacy & Security › Files & Folders**. Under **Terminal**, turn on **Data shared by Things and affiliated apps**.
    - Without this, Do Things reports "Things database not found".
 4. **Shortcuts needs the same permission.** Terminal's access doesn't cover the Do Things shortcut (section 7). Expect the same macOS prompt, for Shortcuts, the first time the shortcut runs.
+5. **Allow Do Things to move tasks to the Trash.** Things' URL commands can't delete, so **Move to Trash** asks Things through AppleScript. The first time you use it, macOS asks whether Terminal (or Shortcuts, if you started Do Things from the shortcut) may control Things. Click **Allow**.
+   - If you missed or declined the prompt, open **System Settings › Privacy & Security › Automation**. Under **Terminal** (and **Shortcuts**), turn on **Things3**.
+   - Without this, Do Things says Things didn't apply the move to the Trash, and the task stays.
 
 ## 4. First run and the auth token
 1. Open Terminal and start Do Things:
@@ -190,7 +193,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
 
 ## Safety notes
-- The Things database is opened read-only. All changes go through Things' own URL commands, as if you'd made them in Things.
+- The Things database is opened read-only. All changes go through Things' own URL commands, as if you'd made them in Things. The one exception is **Move to Trash**: Things' URL commands can't delete, so Do Things asks Things through AppleScript, which moves the task to Things' Trash (never erases it). It runs only after you confirm it in the card, only for an open task, and is confirmed like any other change.
 - A change counts as done only after it appears in Things' data. The saved order is updated only after a move is confirmed.
 - If an automatic update isn't confirmed, automatic updates pause until you click **Retry**, save a new token or restart Do Things. The failure is logged once. Changes you make yourself are still sent, each with its own message if it fails.
 - Tags are written as a full list, so your other tags are kept. A tag containing a comma can't be written safely, so such a task is logged and skipped.
@@ -205,7 +208,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - Today is worked out from start dates and deadlines. It can differ from Things in edge cases, such as tasks inside a project that is itself scheduled later. By design, Do Things also lists due tasks you've removed from Things' Today.
 - The searches are fixed: P1, P2, P3, P4 and Overdue. New ones are added in code.
 - Changes show immediately but are confirmed with Things in the background, one at a time. While a change is pending, that task can't be dragged or opened. A change Things doesn't apply within 5 seconds is undone on the page.
-- The editor can't delete a task, edit its checklist, change repeat settings or attachments, or take a task out of a project, area or heading. Use **Open in Things** for those.
+- The editor can't edit a task's checklist, change repeat settings or attachments, or take a task out of a project, area or heading. Use **Open in Things** for those.
 - Do Things runs only on the Mac where Things is installed. It has no iPhone or iPad version, but changes it makes appear there through Things' sync.
 
 ## Reporting issues and errors

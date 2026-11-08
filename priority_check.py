@@ -7,9 +7,10 @@ edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides what kind of sequence a project tagged Sequential or
 Next Up is, and which task such a project starts next.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): Synchronized module version metadata.
 - v1.4.0 (2026-11-08): Task carries its reminder time (display only).
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.

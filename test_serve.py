@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): Tests for moving a task to the Trash (/api/trash).
 - v1.4.0 (2026-11-08): Tests for reminder times in rows, the editor and the edit preview.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
@@ -564,6 +565,38 @@ class CompletionTests(MockThingsTestCase):
         self.assertEqual([(t["id"], t["completed"]) for t in p1], [("task1", False), ("done1", True)])
         group = serve.list_response("today")["groups"][0]
         self.assertEqual([t["id"] for t in group["tasks"]], ["task1", "done1"])
+
+
+class TrashTests(MockThingsTestCase):
+    """Moving a task to Things' Trash from the editor."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.move_to_trash = mock.patch.object(serve, "move_to_trash", return_value=True).start()
+
+    def test_open_task_trashed_without_token(self) -> None:
+        with mock.patch.object(serve, "load_token", return_value=None):
+            self.assertEqual(serve.trash_task({"id": "task1"}), {"ok": True})
+        self.move_to_trash.assert_called_once_with("task1", self.db_path)
+        self.apply_change.assert_not_called()  # No URL write and no tag change with it.
+
+    def test_unconfirmed_trash_reported(self) -> None:
+        self.move_to_trash.return_value = False
+        self.assertEqual(serve.trash_task({"id": "task1"}), {"ok": False, "write_failed": True})
+
+    def test_refused_requests(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET status = ?, stopDate = ? WHERE uuid = 'task1'",
+                         (STATUS_COMPLETED, start_of_day(TODAY) + 60))
+        for body, status in (({"id": "task1"}, 409), ({"id": "nosuch"}, 404), ({"id": "bad id"}, 400), ({}, 400)):
+            with self.subTest(body=body):
+                with self.assertRaises(serve.ApiError) as raised:
+                    serve.trash_task(body)
+                self.assertEqual(raised.exception.status, status)
+        self.move_to_trash.assert_not_called()
+
+    def test_routed(self) -> None:
+        self.assertIs(serve.POST_ROUTES["/api/trash"], serve.trash_task)
 
 
 class EditTests(MockThingsTestCase):

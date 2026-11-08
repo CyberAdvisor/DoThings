@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.4.0
+  Version: 1.5.0
 
   Change log:
+  - v1.5.0 (2026-11-08): "Move to Trash" in the editor of an open task asks for
+    confirmation in the card, then moves the task to Things' Trash; a failure
+    lists the Automation permission checks.
   - v1.4.0 (2026-11-08): A task's reminder time shows in small gray text after
     its title, and read-only after the date on the editor's When line.
   - v1.3.1 (2026-11-08): Synchronized module version metadata.
@@ -190,7 +193,8 @@
   .editor .seg button:last-child { border-radius: 0 6px 6px 0; }
   .editor .seg button.on { background: var(--accent); color: #fff; }
   .editor .note { color: var(--muted); font-size: 12px; margin-left: 26px; }
-  .editor .foot { display: flex; align-items: center; gap: 8px; margin-left: 26px; }
+  .editor .foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-left: 26px; }
+  .editor .foot button { white-space: nowrap; }  /* Wrap the row, never a button's label. */
   .editor .adders { display: flex; gap: 4px; margin-left: auto; }
   .editor .adders button { background: none; border: 1px solid var(--line); color: var(--muted); padding: 2px 8px; font-size: 12px; }
   .editor .ed-date {
@@ -218,6 +222,14 @@
   .editor .checklist { color: var(--muted); font-size: 12px; }
   .editor .reset { display: flex; flex-direction: column; gap: 6px; }
   .editor .reset-buttons { display: flex; gap: 8px; }
+  /* Move to Trash sits at the right end of the bottom row, after the + buttons when there are any. */
+  .editor .ed-trash { color: var(--red); border-color: var(--red); margin-left: auto; }
+  .editor .adders + .ed-trash { margin-left: 0; }
+  .editor .trash-confirm {
+    display: flex; flex-direction: column; gap: 6px; margin-left: 26px; padding: 8px 10px;
+    border: 1px solid var(--red); border-radius: 8px; color: var(--red); font-size: 13px;
+  }
+  button.danger { background: var(--red); border-color: var(--red); color: #fff; }
   .editor .ed-status { color: var(--red); font-size: 12px; margin-left: 26px; min-height: 0; }
   .drop-marker { height: 2px; background: var(--accent); border-radius: 1px; margin: 0 10px; }
   /* Setup screen */
@@ -532,9 +544,17 @@ const WRITE_FAILED_STEPS = [
   "The token matches: click Manage there, copy the token, then click Update token.",
 ];
 
-/** One-line status message for a change (e.g. "the move") that Things didn't apply. */
-function writeFailedMessage(what) {
-  return `Things didn't apply ${what}. Check: ` + WRITE_FAILED_STEPS.map((s, i) => `${i + 1}. ${s}`).join(" ");
+// Checks for a move to the Trash Things did not apply: it uses AppleScript, so
+// macOS's Automation permission matters instead of the token.
+const TRASH_FAILED_STEPS = [
+  "Things is open.",
+  "In System Settings › Privacy & Security › Automation, the app that started Do Things " +
+    "(Terminal, or Shortcuts if you use the shortcut) is allowed to control Things.",
+];
+
+/** One-line status message for a change (e.g. "the move") that Things didn't apply, with the checks `steps`. */
+function writeFailedMessage(what, steps) {
+  return `Things didn't apply ${what}. Check: ` + steps.map((s, i) => `${i + 1}. ${s}`).join(" ");
 }
 
 /** Join names for a sentence: "P1, P2, P3 and P4". */
@@ -675,9 +695,9 @@ let saveQueue = Promise.resolve();
  * updated to show it; `row` (if any) is dimmed until Things confirms. When the
  * last pending change finishes the list is redrawn from Things, so a change
  * Things didn't apply goes back to how it really is, with a message naming
- * `what` failed.
+ * `what` failed and the checks `steps` to try.
  */
-function enqueue(row, what, request) {
+function enqueue(row, what, request, steps = WRITE_FAILED_STEPS) {
   state.pending++;
   if (row) {
     row.classList.add("saving");
@@ -687,7 +707,7 @@ function enqueue(row, what, request) {
   saveQueue = saveQueue.then(async () => {
     try {
       const result = await request();
-      if (!result.ok) setStatus(writeFailedMessage(what));
+      if (!result.ok) setStatus(writeFailedMessage(what, steps));
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -750,6 +770,7 @@ async function startEdit(row, id) {
       preview: null,      // The server's preview of the edit (see refreshPreview); null until a date or priority changes.
       previewSeq: 0,      // Numbers preview requests, so only the newest answer is shown.
       reset: null,        // The server's preview of "Reset other tasks" while its confirm line is shown.
+      trash: false,       // True while "Move to Trash" asks for confirmation.
       touched: { when: false, deadline: false }, // Dates chosen here (not just loaded).
       draft: {
         title: task.title, notes: task.notes, when: { ...task.when }, deadline: task.deadline || "",
@@ -972,8 +993,13 @@ function buildEditor() {
       adders.append(add);
     }
     foot.append(adders);
+    const trash = el("button", "secondary ed-trash", "Move to Trash");
+    trash.type = "button";
+    trash.onclick = () => { state.edit.trash = true; redrawEditor(); };
+    foot.append(trash);
   }
-  card.append(foot);
+  // While the move to the Trash waits for confirmation, its question replaces the bottom row.
+  card.append(state.edit.trash ? trashConfirm(task) : foot);
   if (state.edit.reset) card.append(resetConfirm(state.edit.reset));
   card.append(el("div", "ed-status"));
   return card;
@@ -1268,6 +1294,35 @@ function applyReset(preview) {
     if (result.ok) setStatus(`Reset ${preview.project}. ${RESET_ORDER_NOTE}`);
     return result;
   });
+}
+
+/** Build the question shown after "Move to Trash"; nothing is sent until it is confirmed. */
+function trashConfirm(task) {
+  const box = el("div", "trash-confirm");
+  box.append(el("div", "",
+    `Move "${task.title || "New To-Do"}" to Things' Trash? You can put it back from the Trash in Things.`));
+  const buttons = el("div", "reset-buttons");
+  const confirm = el("button", "danger", "Move to Trash");
+  confirm.type = "button";
+  confirm.onclick = applyTrash;
+  const cancel = el("button", "secondary", "Cancel");
+  cancel.type = "button";
+  cancel.onclick = () => { state.edit.trash = false; redrawEditor(); };
+  buttons.append(confirm, cancel);
+  box.append(buttons);
+  return box;
+}
+
+/**
+ * Move the open task to Things' Trash in the background. The card goes at
+ * once; if Things doesn't confirm, the reload brings the task back with the
+ * Automation checks. Unsaved edits in the card are discarded.
+ */
+function applyTrash() {
+  const { task, card } = state.edit;
+  state.edit = null;
+  card.remove();
+  enqueue(null, "the move to the Trash", () => api("/api/trash", { id: task.id }), TRASH_FAILED_STEPS);
 }
 
 /** Close the editor without saving and redraw the list. */

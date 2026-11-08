@@ -1,11 +1,14 @@
 """Shared logic for Do Things.
 
 Holds file paths, version loading, logging, read-only access to the Things
-database, Things URL commands, the local task-order file and the auth token.
+database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file and the auth token.
 
-Version: 1.4.0
+Version: 1.5.0
 
 Change log:
+- v1.5.0 (2026-11-08): move_to_trash moves a to-do to Things' Trash with
+  AppleScript (task id passed as an argument) and confirms trashed = 1; the
+  send-and-confirm loop takes a send step, shared by URL and AppleScript writes.
 - v1.4.0 (2026-11-08): Every task read carries its reminder time.
 - v1.3.1 (2026-11-08): Reads Things' reminder times for the diagnostic
   (read_raw_reminder_times) and decodes them (unpack_things_time).
@@ -604,7 +607,9 @@ def apply_change(change: Change, token: str, db_path: str) -> bool:
         task = read_task(conn, change.task_id)
         return task is not None and change.is_satisfied_by(task)
 
-    return _send_and_confirm(lambda: build_update_url(change, token), confirmed, f"task {change.task_id}", db_path)
+    what = f"task {change.task_id}"
+    return _send_and_confirm(lambda: _open_update_url(lambda: build_update_url(change, token), what),
+                             confirmed, what, db_path)
 
 
 def apply_project_change(change: ProjectChange, token: str, db_path: str) -> bool:
@@ -616,27 +621,86 @@ def apply_project_change(change: ProjectChange, token: str, db_path: str) -> boo
         tags = read_project_tags(conn, change.project_id)
         return tags is not None and change.is_satisfied_by(tags)
 
-    return _send_and_confirm(
-        lambda: build_update_project_url(change, token), confirmed, f"project {change.project_id}", db_path
-    )
+    what = f"project {change.project_id}"
+    return _send_and_confirm(lambda: _open_update_url(lambda: build_update_project_url(change, token), what),
+                             confirmed, what, db_path)
 
 
-def _send_and_confirm(
-    build_url: Callable[[], str], confirmed: Callable[[sqlite3.Connection], bool], what: str, db_path: str
-) -> bool:
-    """Open the URL `build_url` returns, then re-read the database until `confirmed` holds.
+def move_to_trash(task_id: str, db_path: str) -> bool:
+    """Move a to-do to Things' Trash and wait until the database shows it trashed.
 
-    `what` names the task or project in log lines. Returns False (and logs) if
-    the URL can't be built or opened, or Things doesn't confirm in time.
+    The URL scheme has no delete, so this is the one write that uses
+    AppleScript. It needs macOS's Automation permission for the app running
+    Do Things (Terminal or Shortcuts) instead of the auth token.
     """
-    logger = get_logger()
+    def confirmed(conn: sqlite3.Connection) -> bool:
+        row = conn.execute("SELECT trashed FROM TMTask WHERE uuid = ?", [task_id]).fetchone()
+        return row is not None and row["trashed"] == 1  # A vanished row is not a confirmation.
+
+    return _send_and_confirm(lambda: run_trash_script(task_id), confirmed, f"task {task_id}", db_path)
+
+
+# AppleScript that deletes one to-do, which Things moves to its Trash
+# (confirmed on a real task 2026-11-08). The task id is passed as an argument
+# (argv), never written into the script, so it can't change what the script does.
+TRASH_SCRIPT = (
+    "on run argv",
+    'tell application "Things3" to delete to do id (item 1 of argv)',
+    "end run",
+)
+
+
+def build_trash_command(task_id: str) -> List[str]:
+    """Return the osascript command that moves `task_id` to Things' Trash."""
+    if not is_valid_task_id(task_id):
+        raise ValueError(f"invalid task id {task_id!r}")
+    command = ["osascript"]
+    for line in TRASH_SCRIPT:
+        command += ["-e", line]
+    return command + [task_id]
+
+
+def run_trash_script(task_id: str) -> bool:
+    """Run the trash AppleScript for `task_id`. Returns False (and logs) on failure.
+
+    osascript's error output names the problem (e.g. "Not authorized to send
+    Apple events to Things3" when the Automation permission is off), and the
+    command holds no secret, so both are safe to log.
+    """
+    try:
+        subprocess.run(build_trash_command(task_id), check=True, timeout=10, capture_output=True, text=True)
+        return True
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        detail = (getattr(error, "stderr", None) or "").strip() or str(error)
+        get_logger().error("Could not move task %s to the Trash: %s", task_id, detail)
+        return False
+
+
+def _open_update_url(build_url: Callable[[], str], what: str) -> bool:
+    """Build a things:/// URL with `build_url` and hand it to Things in the background.
+
+    Returns False (and logs) if the URL can't be built (e.g. a tag containing
+    a comma) or `open` fails.
+    """
     try:
         url = build_url()
     except ValueError as error:
-        logger.error("Skipped %s: %s", what, error)
+        get_logger().error("Skipped %s: %s", what, error)
         return False
-    if not open_things_url(url, background=True):
+    return open_things_url(url, background=True)
+
+
+def _send_and_confirm(
+    send: Callable[[], bool], confirmed: Callable[[sqlite3.Connection], bool], what: str, db_path: str
+) -> bool:
+    """Run `send`, then re-read the database until `confirmed` holds.
+
+    `what` names the task or project in log lines. Returns False (and logs) if
+    sending fails or Things doesn't confirm in time.
+    """
+    if not send():
         return False
+    logger = get_logger()
     deadline = time.monotonic() + CONFIRM_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         time.sleep(CONFIRM_POLL_SECONDS)
@@ -646,10 +710,7 @@ def _send_and_confirm(
                     return True
         except sqlite3.Error as error:
             logger.warning("Could not re-read %s: %s", what, error)
-    logger.error(
-        "Things did not confirm the change to %s (wrong auth token, missing tag, or Things not running)",
-        what,
-    )
+    logger.error("Things did not confirm the change to %s (see the checks shown on the page)", what)
     return False
 
 
