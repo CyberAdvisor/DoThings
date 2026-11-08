@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.3.1
+  Version: 1.4.0
 
   Change log:
+  - v1.4.0 (2026-11-08): A task's reminder time shows in small gray text after
+    its title, and read-only after the date on the editor's When line.
   - v1.3.1 (2026-11-08): Synchronized module version metadata.
   - v1.3.0 (2026-11-08): "Hide Empty" sidebar checkbox hides Today's priority
     groups that show no tasks (after Hide Completed); while a task is dragged
@@ -144,9 +146,10 @@
   .task.done { opacity: 0.55; }
   .task.done .title { text-decoration: line-through; color: var(--muted); }
   .task .body { flex: 1; min-width: 0; }
-  /* First line, as in Things: [start badge] title [icons] [tag pills]. */
+  /* First line, as in Things: [start badge] title [reminder time] [icons] [tag pills]. */
   .task .line { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .task .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 0; }
+  .task .reminder { color: var(--muted); font-size: 12px; flex-shrink: 0; white-space: nowrap; }
   .task .icon { color: var(--muted); display: flex; flex-shrink: 0; }
   .task .icon svg { width: 13px; height: 13px; }
   .task .when-badge {
@@ -196,6 +199,7 @@
   .editor .ed-date:hover { border-color: var(--line); }
   .editor .ed-date.overdue { color: var(--red); }
   .editor .ed-tomorrow { padding: 2px 10px; font-size: 12px; }
+  .editor .ed-reminder { color: var(--muted); font-size: 12px; }
   /* Date picker popover under the When or Deadline row. */
   .picker {
     margin-left: 26px; width: 236px; padding: 8px; border: 1px solid var(--line); border-radius: 8px;
@@ -458,6 +462,7 @@ function taskRow(task, priority) {
   const line = el("div", "line");
   if (task.start_label) line.append(el("span", "when-badge", task.start_label));
   line.append(el("span", "title", task.title || "New To-Do"));
+  if (task.reminder_label) line.append(el("span", "reminder", task.reminder_label));
   for (const [key, label] of [["repeating", "Repeating"], ["has_notes", "Notes"], ["has_checklist", "Checklist"]]) {
     if (!task[key]) continue;
     const icon = el("span", "icon");
@@ -850,6 +855,12 @@ function buildEditor() {
       || "📅 " + dateLabel(dates.when.date);
     const tomorrow = addDays(state.edit.today, 1);
     const parts = [dateButton(label, "when", false)];
+    if (dates.when.reminder) {
+      // Read-only: the reminder time is set in Things.
+      const reminder = el("span", "ed-reminder", dates.when.reminder);
+      reminder.title = "Reminder (change it in Things)";
+      parts.push(reminder);
+    }
     if (dates.when.date !== tomorrow) {
       // Defer to tomorrow in one click.
       const defer = el("button", "secondary ed-tomorrow", "Tomorrow");

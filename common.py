@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): Every task read carries its reminder time.
 - v1.3.1 (2026-11-08): Reads Things' reminder times for the diagnostic
   (read_raw_reminder_times) and decodes them (unpack_things_time).
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
@@ -155,8 +156,8 @@ def unpack_things_date(value: Optional[int]) -> Optional[date]:
 
 # Things stores a to-do's reminder time (TMTask.reminderTime) as a packed
 # integer: hour << 26 | minute << 20. This layout is not documented by Things;
-# debug_things.py prints the raw and decoded values so it can be checked
-# against reminders set in Things.
+# it was checked against real reminders (9:15 AM, 3:00 PM) on 2026-11-08, and
+# debug_things.py prints the raw and decoded values to check it again.
 
 
 def unpack_things_time(value: Optional[int]) -> Optional[dt_time]:
@@ -213,7 +214,7 @@ def _project_has_tag(tag: str) -> str:
 # to-do of a project tagged Next Up and not Sequential (tagged both, it is
 # Sequential); refresh rule 3 makes such a to-do P4.
 _TASK_SELECT = f"""
-SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate,
+SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate, t.reminderTime,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
        COALESCE(t.project, h.project) AS project_id, h."index" AS heading_index, t."index" AS task_index,
        t.rt1_repeatingTemplate IS NOT NULL AS repeating,
@@ -266,6 +267,7 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         repeating=bool(row["repeating"]),
         has_checklist=bool(row["has_checklist"]),
         next_up=bool(row["next_up"]),
+        reminder=unpack_things_time(row["reminderTime"]),
     )
 
 
@@ -473,15 +475,11 @@ def read_checklist_progress(conn: sqlite3.Connection, task_id: str) -> Dict[str,
     return {"done": row[1], "total": row[0]}
 
 
-def read_raw_reminder_times(conn: sqlite3.Connection, task_ids: Iterable[str]) -> Optional[Dict[str, int]]:
+def read_raw_reminder_times(conn: sqlite3.Connection, task_ids: Iterable[str]) -> Dict[str, int]:
     """Return the raw reminderTime of each given task that has one.
 
-    Used by debug_things.py to check the packed format against real reminders.
-    Returns None if the database has no reminderTime column.
+    Used by debug_things.py to show the packed value next to the decoded time.
     """
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(TMTask)")}
-    if "reminderTime" not in columns:
-        return None
     ids = list(task_ids)
     if not ids:
         return {}

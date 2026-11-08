@@ -7,9 +7,10 @@ would make, plus each sequential (Sequential or Next Up) project's kind and task
 and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): reminderTime is a required column (the task queries read it).
 - v1.3.1 (2026-11-08): Prints each Today task's reminder time, raw and decoded,
   and a summary line, to check the reminder format against Things.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
@@ -23,7 +24,6 @@ Change log:
 """
 
 import sqlite3
-from typing import Dict, Optional
 
 from common import (
     PROJECT_VERSION,
@@ -54,7 +54,7 @@ REQUIRED_COLUMNS = {
     "TMTask": (
         "uuid", "title", "type", "status", "trashed", "start", "startDate", "deadline",
         "todayIndex", "index", "project", "heading", "area", "stopDate", "rt1_recurrenceRule",
-        "notes", "rt1_repeatingTemplate",
+        "notes", "rt1_repeatingTemplate", "reminderTime",
     ),
     "TMTag": ("uuid", "title"),
     "TMTaskTag": ("tasks", "tags"),
@@ -94,13 +94,6 @@ def describe_reminder(raw: int) -> str:
     """Describe a raw reminderTime value and how Do Things decodes it, e.g. "970981376 (0x39e00000) -> 14:30"."""
     decoded = unpack_things_time(raw)
     return f"{raw} (0x{raw:08x}) -> {decoded.strftime('%H:%M') if decoded else 'unreadable'}"
-
-
-def describe_reminder_count(reminders: Optional[Dict[str, int]]) -> str:
-    """Summarize the reminder check: a missing column, or how many Today tasks have a reminder."""
-    if reminders is None:
-        return "TMTask has no reminderTime column"
-    return f"{len(reminders)} Today task(s) with a reminder time (compare each with Things)"
 
 
 def run() -> None:
@@ -151,9 +144,9 @@ def run() -> None:
             f"    project_rank={task.project_rank}\n"
             f"    required={required_priority(task, today)} planned={planned}"
         )
-        if reminders and task.uuid in reminders:
+        if task.uuid in reminders:
             print(f"    reminder: {describe_reminder(reminders[task.uuid])}")
-    print(f"\nReminders: {describe_reminder_count(reminders)}")
+    print(f"\nReminders: {len(reminders)} Today task(s) with a reminder time (compare each with Things)")
     print(f"\nDo Things v{PROJECT_VERSION} complete: diagnostic finished")
 
 

@@ -7,9 +7,10 @@ edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides what kind of sequence a project tagged Sequential or
 Next Up is, and which task such a project starts next.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): Task carries its reminder time (display only).
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Untagged Today task of a Next Up project is P4
@@ -27,6 +28,7 @@ Change log:
 
 from dataclasses import dataclass, field, replace
 from datetime import date
+from datetime import time as dt_time
 from typing import Dict, Iterable, List, Optional, Tuple
 
 # Priority tags, highest first. Their order defines "highest priority wins".
@@ -66,6 +68,7 @@ class Task:
     repeating: bool = False  # A copy of a repeating to-do (shown with a ↻ icon).
     has_checklist: bool = False
     next_up: bool = False  # In a project tagged Next Up and not Sequential: untagged, it is P4.
+    reminder: Optional[dt_time] = None  # Reminder time set in Things; display only, no rule uses it.
 
     @property
     def completed(self) -> bool:

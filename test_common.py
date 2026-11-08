@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): Test that task reads carry the reminder time.
 - v1.3.1 (2026-11-08): Tests for the reminder time format and the raw reminder read.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Test for the next_up flag.
@@ -532,13 +533,8 @@ class DatabaseTests(unittest.TestCase):
             # Only tasks that have a reminder are returned; unknown ids are ignored.
             self.assertEqual(read_raw_reminder_times(conn, ["today1", "today2", "nope"]), {"today1": packed})
             self.assertEqual(read_raw_reminder_times(conn, []), {})
-
-    def test_raw_reminder_times_without_column(self) -> None:
-        path = os.path.join(self.folder.name, "old.sqlite")
-        with write_db(path) as conn:
-            conn.execute("CREATE TABLE TMTask (uuid TEXT PRIMARY KEY)")
-        with open_things_db(path) as conn:
-            self.assertIsNone(read_raw_reminder_times(conn, ["today1"]))
+            self.assertEqual(read_task(conn, "today1").reminder, dt_time(9, 15))
+            self.assertIsNone(read_task(conn, "today2").reminder)
 
     def test_checklist_progress(self) -> None:
         with write_db(self.path) as conn:

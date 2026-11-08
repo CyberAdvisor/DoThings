@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): Tests for reminder times in rows, the editor and the edit preview.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Tests for Reset other tasks (detail, preview, reset, due-
@@ -24,6 +25,7 @@ import sqlite3
 import tempfile
 import unittest
 from datetime import date, timedelta
+from datetime import time as dt_time
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
@@ -591,7 +593,7 @@ class EditTests(MockThingsTestCase):
     def test_detail(self) -> None:
         detail = serve.task_detail("task1")
         task = detail["task"]
-        self.assertEqual((task["priority"], task["when"]), ("P2", {"kind": "today", "date": TODAY.isoformat()}))
+        self.assertEqual((task["priority"], task["when"]), ("P2", {"kind": "today", "date": TODAY.isoformat(), "reminder": None}))
         self.assertEqual((task["tags"], task["other_tags"]), (["P2"], []))
         self.assertEqual(detail["today"], TODAY.isoformat())
         self.assertEqual(detail["options"]["tags"], ["Home"])
@@ -667,7 +669,7 @@ class EditTests(MockThingsTestCase):
         tomorrow = (TODAY + timedelta(days=1)).isoformat()
         preview = self.preview(when=tomorrow)
         self.assertEqual(preview["deadline"], tomorrow)
-        self.assertEqual(preview["when"], {"kind": "date", "date": tomorrow})
+        self.assertEqual(preview["when"], {"kind": "date", "date": tomorrow, "reminder": None})
         self.assertIsNone(preview["place"])
         self.assertIsNotNone(preview["row"]["start_label"])
 
@@ -689,6 +691,29 @@ class EditTests(MockThingsTestCase):
         self.apply_change.assert_not_called()
         with self.assertRaises(serve.ApiError):
             self.preview("inbox")
+
+    def set_reminder(self, hour: int, minute: int) -> None:
+        """Give task1 a reminder time, packed as Things stores it."""
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET reminderTime = ? WHERE uuid = 'task1'", ((hour << 26) | (minute << 20),))
+
+    def test_reminder_in_row_and_detail(self) -> None:
+        self.set_reminder(14, 30)
+        row = serve.list_response("today")["groups"][1]["tasks"][0]
+        self.assertEqual(row["reminder_label"], "2:30 PM")
+        self.assertEqual(serve.task_detail("task1")["task"]["when"]["reminder"], "2:30 PM")
+
+    def test_preview_keeps_reminder_unless_when_changes(self) -> None:
+        self.set_reminder(9, 15)
+        for changes in ({}, {"title": "Renamed"}, {"priority": "P3"}, {"when": "today"}):
+            with self.subTest(changes=changes):
+                preview = self.preview(**changes)
+                self.assertEqual((preview["when"]["reminder"], preview["row"]["reminder_label"]), ("9:15 AM", "9:15 AM"))
+        # Whether Things keeps the reminder when When changes is unconfirmed, so it is left out.
+        for when in ((TODAY + timedelta(days=1)).isoformat(), "someday", "anytime"):
+            with self.subTest(when=when):
+                preview = self.preview(when=when)
+                self.assertEqual((preview["when"]["reminder"], preview["row"]["reminder_label"]), (None, None))
 
     def test_unconfirmed_edit_reported(self) -> None:
         self.apply_change.return_value = False
@@ -720,6 +745,15 @@ class RowDisplayTests(unittest.TestCase):
         self.assertFalse(row["has_notes"])  # Only whitespace.
         self.assertTrue(row["has_checklist"] and row["repeating"])
         self.assertTrue(serve.task_to_json(Task(uuid="A2", title="T", notes="x"), TODAY)["has_notes"])
+
+
+    def test_reminder_wording(self) -> None:
+        cases = {(9, 15): "9:15 AM", (15, 0): "3:00 PM", (0, 5): "12:05 AM", (12, 0): "12:00 PM", (23, 59): "11:59 PM"}
+        for (hour, minute), label in cases.items():
+            with self.subTest(label=label):
+                self.assertEqual(serve.reminder_label(dt_time(hour, minute)), label)
+        self.assertIsNone(serve.reminder_label(None))
+        self.assertIsNone(serve.task_to_json(Task(uuid="A1", title="T"), TODAY)["reminder_label"])
 
 
 class ListRoutingTests(MockThingsTestCase):

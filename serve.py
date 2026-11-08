@@ -8,9 +8,11 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.3.1
+Version: 1.4.0
 
 Change log:
+- v1.4.0 (2026-11-08): Rows and the editor's When carry the reminder time
+  (reminder_label, e.g. "2:30 PM"); the edit preview leaves it out when When changes.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Task detail sends sequence_project; POST
@@ -33,6 +35,7 @@ import urllib.parse
 import webbrowser
 from dataclasses import replace
 from datetime import date
+from datetime import time as dt_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -156,6 +159,7 @@ def task_to_json(
         "deadline_state": deadline_state(task.deadline, today),
         "start_date": task.start_date.isoformat() if task.start_date else None,
         "start_label": start_label(task.start_date, today),
+        "reminder_label": reminder_label(task.reminder),
         "has_notes": bool(task.notes.strip()),
         "has_checklist": task.has_checklist,
         "repeating": task.repeating,
@@ -191,6 +195,14 @@ def start_label(start: Optional[date], today: date) -> Optional[str]:
         return start.strftime("%a")
     label = f"{start.strftime('%b')} {start.day}"
     return label if start.year == today.year else f"{label}, {start.year}"
+
+
+def reminder_label(reminder: Optional[dt_time]) -> Optional[str]:
+    """Return a reminder time as shown after the title, e.g. '9:15 AM' or '12:00 PM' (None if unset)."""
+    if reminder is None:
+        return None
+    hour = reminder.hour % 12 or 12  # 0:00 is 12 AM, 12:00 is 12 PM.
+    return f"{hour}:{reminder.minute:02d} {'AM' if reminder.hour < 12 else 'PM'}"
 
 
 def require_db_path() -> str:
@@ -450,13 +462,14 @@ def complete_task(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def when_json(task: Task, today: date) -> Dict[str, Optional[str]]:
-    """Describe a task's When for the edit view: kind today/date/anytime/someday, plus the date."""
+    """Describe a task's When for the edit view: kind today/date/anytime/someday, the date and reminder time."""
+    reminder = reminder_label(task.reminder)
     if task.someday:
-        return {"kind": "someday", "date": None}
+        return {"kind": "someday", "date": None, "reminder": reminder}
     if task.start_date is None:
-        return {"kind": "anytime", "date": None}
+        return {"kind": "anytime", "date": None, "reminder": reminder}
     kind = "today" if task.start_date <= today else "date"
-    return {"kind": kind, "date": task.start_date.isoformat()}
+    return {"kind": kind, "date": task.start_date.isoformat(), "reminder": reminder}
 
 
 def task_detail(task_id: object) -> Dict[str, Any]:
@@ -581,6 +594,11 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
     today = today_local()
     change, options = plan_edit_request(body, task, db_path, today)
     after = task if change is None else predict(task, change, today)
+    if (after.start_date, after.someday) != (task.start_date, task.someday):
+        # Whether Things keeps a reminder when When changes through the URL
+        # scheme is unconfirmed, so the preview leaves it out rather than
+        # guess; the reloaded row shows what Things kept.
+        after = replace(after, reminder=None)
     if change is not None and change.set_list_id is not None:
         titles = {item["id"]: item["title"] for item in options["areas"] + options["projects"]}
         after = replace(after, context=titles[change.set_list_id])
