@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.3.0
+Version: 1.3.1
 
 Change log:
+- v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Tests for Reset other tasks (detail, preview, reset, due-
   only kept task, failures, guards); Next Up start now tagged P4 by rule 3.

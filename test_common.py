@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.3.0
+Version: 1.3.1
 
 Change log:
+- v1.3.1 (2026-11-08): Tests for the reminder time format and the raw reminder read.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Test for the next_up flag.
 - v1.1.0 (2026-11-08): Tests for the P4 search, Next Up project queries, the
@@ -29,6 +30,7 @@ import time
 import unittest
 import urllib.parse
 from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 from typing import Iterator
 from unittest import mock
 from zoneinfo import ZoneInfo
@@ -63,6 +65,7 @@ from common import (
     read_last_completed,
     read_list,
     read_project_tags,
+    read_raw_reminder_times,
     read_sequence_project_tags,
     read_sequential_projects,
     read_task,
@@ -72,6 +75,7 @@ from common import (
     start_of_day,
     today_local,
     unpack_things_date,
+    unpack_things_time,
     validate_token,
 )
 from priority_check import Change, ProjectChange
@@ -93,7 +97,8 @@ CREATE TABLE TMTask (
     uuid TEXT PRIMARY KEY, title TEXT, type INTEGER, status INTEGER, trashed INTEGER,
     start INTEGER, startDate INTEGER, deadline INTEGER, deadlineSuppressionDate INTEGER,
     todayIndex INTEGER, "index" INTEGER, project TEXT, heading TEXT, area TEXT,
-    stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT
+    stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT,
+    reminderTime INTEGER
 );
 CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
@@ -205,6 +210,21 @@ class ThingsDateTests(unittest.TestCase):
         self.assertIsNone(unpack_things_date(None))
         self.assertIsNone(unpack_things_date(0))
         self.assertIsNone(unpack_things_date((2026 << 16) | (13 << 12) | (1 << 7)))
+
+
+class ThingsTimeTests(unittest.TestCase):
+    """Things' packed reminder time format (hour << 26 | minute << 20)."""
+
+    def test_known_values(self) -> None:
+        self.assertEqual(unpack_things_time((14 << 26) | (30 << 20)), dt_time(14, 30))
+        self.assertEqual(unpack_things_time((12 << 26) | (0 << 20)), dt_time(12, 0))
+        self.assertEqual(unpack_things_time(0), dt_time(0, 0))
+
+    def test_empty_and_invalid(self) -> None:
+        self.assertIsNone(unpack_things_time(None))
+        self.assertIsNone(unpack_things_time(-1))
+        self.assertIsNone(unpack_things_time(25 << 26))  # Hour 25.
+        self.assertIsNone(unpack_things_time((9 << 26) | (61 << 20)))  # Minute 61.
 
 
 class UrlTests(unittest.TestCase):
@@ -503,6 +523,22 @@ class DatabaseTests(unittest.TestCase):
             one, two = read_task(conn, "today1"), read_task(conn, "today2")
         self.assertEqual((one.repeating, one.has_checklist), (True, False))
         self.assertEqual((two.repeating, two.has_checklist), (False, True))
+
+    def test_raw_reminder_times(self) -> None:
+        packed = (9 << 26) | (15 << 20)
+        with write_db(self.path) as conn:
+            conn.execute("UPDATE TMTask SET reminderTime = ? WHERE uuid = 'today1'", [packed])
+        with open_things_db(self.path) as conn:
+            # Only tasks that have a reminder are returned; unknown ids are ignored.
+            self.assertEqual(read_raw_reminder_times(conn, ["today1", "today2", "nope"]), {"today1": packed})
+            self.assertEqual(read_raw_reminder_times(conn, []), {})
+
+    def test_raw_reminder_times_without_column(self) -> None:
+        path = os.path.join(self.folder.name, "old.sqlite")
+        with write_db(path) as conn:
+            conn.execute("CREATE TABLE TMTask (uuid TEXT PRIMARY KEY)")
+        with open_things_db(path) as conn:
+            self.assertIsNone(read_raw_reminder_times(conn, ["today1"]))
 
     def test_checklist_progress(self) -> None:
         with write_db(self.path) as conn:

@@ -3,12 +3,15 @@
 Prints where the Things database is, whether the columns Do Things relies on
 exist, whether the P1-P4 tags exist, and every Today task with its tags,
 dates, completion, project order, required priority and the change the refresh rules
-would make, plus each sequential (Sequential or Next Up) project's kind and task in progress.
+would make, plus each sequential (Sequential or Next Up) project's kind and task in progress,
+and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.3.0
+Version: 1.3.1
 
 Change log:
+- v1.3.1 (2026-11-08): Prints each Today task's reminder time, raw and decoded,
+  and a summary line, to check the reminder format against Things.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Synchronized module version metadata.
 - v1.1.0 (2026-11-08): Shows each project's kind (Sequential or Next Up) and
@@ -20,6 +23,7 @@ Change log:
 """
 
 import sqlite3
+from typing import Dict, Optional
 
 from common import (
     PROJECT_VERSION,
@@ -28,9 +32,11 @@ from common import (
     missing_priority_tags,
     open_things_db,
     read_list,
+    read_raw_reminder_times,
     read_sequence_project_tags,
     read_sequential_projects,
     today_local,
+    unpack_things_time,
 )
 from priority_check import (
     Change,
@@ -84,6 +90,19 @@ def describe_change(change: Change) -> str:
     return "; ".join(parts)
 
 
+def describe_reminder(raw: int) -> str:
+    """Describe a raw reminderTime value and how Do Things decodes it, e.g. "970981376 (0x39e00000) -> 14:30"."""
+    decoded = unpack_things_time(raw)
+    return f"{raw} (0x{raw:08x}) -> {decoded.strftime('%H:%M') if decoded else 'unreadable'}"
+
+
+def describe_reminder_count(reminders: Optional[Dict[str, int]]) -> str:
+    """Summarize the reminder check: a missing column, or how many Today tasks have a reminder."""
+    if reminders is None:
+        return "TMTask has no reminderTime column"
+    return f"{len(reminders)} Today task(s) with a reminder time (compare each with Things)"
+
+
 def run() -> None:
     """Print the diagnostic report."""
     print(f"Do Things v{PROJECT_VERSION} diagnostic")
@@ -102,6 +121,7 @@ def run() -> None:
         tasks = read_list(conn, "today", today)
         projects = read_sequential_projects(conn)
         project_tags = read_sequence_project_tags(conn)
+        reminders = read_raw_reminder_times(conn, [task.uuid for task in tasks])
     pulls = load_pulls()
     print(f"\nSequential and Next Up projects: {len(projects)}")
     for project, project_tasks in projects.items():
@@ -131,6 +151,9 @@ def run() -> None:
             f"    project_rank={task.project_rank}\n"
             f"    required={required_priority(task, today)} planned={planned}"
         )
+        if reminders and task.uuid in reminders:
+            print(f"    reminder: {describe_reminder(reminders[task.uuid])}")
+    print(f"\nReminders: {describe_reminder_count(reminders)}")
     print(f"\nDo Things v{PROJECT_VERSION} complete: diagnostic finished")
 
 

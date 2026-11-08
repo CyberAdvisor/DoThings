@@ -8,9 +8,10 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.3.0
+Version: 1.3.1
 
 Change log:
+- v1.3.1 (2026-11-08): Synchronized module version metadata.
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Task detail sends sequence_project; POST
   /api/sequence/reset/preview and /api/sequence/reset for Reset other tasks;

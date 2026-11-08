@@ -3,9 +3,11 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.3.0
+Version: 1.3.1
 
 Change log:
+- v1.3.1 (2026-11-08): Reads Things' reminder times for the diagnostic
+  (read_raw_reminder_times) and decodes them (unpack_things_time).
 - v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Every task read carries next_up (project tagged Next Up
   and not Sequential).
@@ -36,6 +38,7 @@ import time
 import urllib.parse
 from collections import Counter
 from datetime import date, datetime
+from datetime import time as dt_time  # `time` is the standard-library module used for timeouts.
 from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
 from priority_check import NEXT_UP_TAG, PRIORITIES, SEQUENCE_TAGS, SEQUENTIAL_TAG, Change, ProjectChange, Task
@@ -147,6 +150,23 @@ def unpack_things_date(value: Optional[int]) -> Optional[date]:
         return date(value >> 16, (value >> 12) & 0xF, (value >> 7) & 0x1F)
     except ValueError:
         # Fail safe: an unreadable date is treated as no date, never as overdue.
+        return None
+
+
+# Things stores a to-do's reminder time (TMTask.reminderTime) as a packed
+# integer: hour << 26 | minute << 20. This layout is not documented by Things;
+# debug_things.py prints the raw and decoded values so it can be checked
+# against reminders set in Things.
+
+
+def unpack_things_time(value: Optional[int]) -> Optional[dt_time]:
+    """Decode a Things packed reminder time; return None for empty or invalid values."""
+    if value is None or value < 0:
+        return None
+    try:
+        return dt_time((value >> 26) & 0x1F, (value >> 20) & 0x3F)
+    except ValueError:
+        # Fail safe: an unreadable time is treated as no reminder, never shown wrong.
         return None
 
 
@@ -451,6 +471,25 @@ def read_checklist_progress(conn: sqlite3.Connection, task_id: str) -> Dict[str,
         [task_id],
     ).fetchone()
     return {"done": row[1], "total": row[0]}
+
+
+def read_raw_reminder_times(conn: sqlite3.Connection, task_ids: Iterable[str]) -> Optional[Dict[str, int]]:
+    """Return the raw reminderTime of each given task that has one.
+
+    Used by debug_things.py to check the packed format against real reminders.
+    Returns None if the database has no reminderTime column.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(TMTask)")}
+    if "reminderTime" not in columns:
+        return None
+    ids = list(task_ids)
+    if not ids:
+        return {}
+    marks = ", ".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT uuid, reminderTime FROM TMTask WHERE uuid IN ({marks}) AND reminderTime IS NOT NULL", ids
+    )
+    return {row["uuid"]: row["reminderTime"] for row in rows}
 
 
 def missing_priority_tags(conn: sqlite3.Connection) -> List[str]:
