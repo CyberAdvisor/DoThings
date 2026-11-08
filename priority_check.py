@@ -1,14 +1,18 @@
 """Priority rules for Do Things.
 
 Pure logic with no I/O, so every rule can be unit-tested without Things.
-It decides which priority tag (P1, P2, P3) a task should carry, what changes a
+It decides which priority tag (P1-P4) a task should carry, what changes a
 manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
-display.
+display. It also decides what kind of sequence a project tagged Sequential or
+Next Up is, and which task such a project starts next.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): P4 (Next Up) priority; Next Up project kind
+  (sequence_kind), ProjectChange and plan_project_tags; plan_sequence starts a
+  Next Up task as P4; P4 search in place_in_list.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -20,10 +24,18 @@ from datetime import date
 from typing import Dict, Iterable, List, Optional, Tuple
 
 # Priority tags, highest first. Their order defines "highest priority wins".
-PRIORITIES = ("P1", "P2", "P3")
+PRIORITIES = ("P1", "P2", "P3", "P4")
 
 # Display name of each priority group in the Today view.
-PRIORITY_LABELS = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up"}
+PRIORITY_LABELS = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up"}
+
+# Project tags in Things that make a project release its tasks one at a time.
+# A Sequential project's task becomes P2 in Today (refresh rule 3); a Next Up
+# project's task is started as P4. A project tagged both is Sequential.
+SEQUENTIAL_TAG = "Sequential"
+NEXT_UP_TAG = "Next Up"
+SEQUENCE_TAGS = (SEQUENTIAL_TAG, NEXT_UP_TAG)
+SEQUENCE_PRIORITY = {NEXT_UP_TAG: "P4"}
 
 
 @dataclass
@@ -106,6 +118,18 @@ class Change:
         return True
 
 
+@dataclass
+class ProjectChange:
+    """A write to send to Things for one project: replace its tags with `tags`."""
+
+    project_id: str
+    tags: List[str]
+
+    def is_satisfied_by(self, project_tags: Iterable[str]) -> bool:
+        """Return True when the project's tags (re-read from Things) reflect this change."""
+        return set(project_tags) == set(self.tags)
+
+
 def priority_tags(tags: Iterable[str]) -> List[str]:
     """Return the priority tags in `tags`, highest priority first."""
     present = set(tags)
@@ -164,7 +188,7 @@ def plan_move(task: Task, destination: str, today: date) -> Change:
     P1 clears a deadline of today or earlier (an overdue one would put the task
     straight back in P1), and if the task is in Today only because of that
     deadline (no start date, or one after today) also sets its start date to
-    today, so it stays in Today. P2 <-> P3 leaves the deadline alone.
+    today, so it stays in Today. Moves among P2, P3 and P4 leave the deadline alone.
     """
     if destination not in PRIORITIES:
         raise ValueError(f"Unknown priority: {destination!r}")
@@ -299,12 +323,12 @@ def predict(task: Task, change: Change, today: date) -> Task:
 def place_in_list(task: Task, name: str, today: date) -> Optional[str]:
     """Return where `task` appears in the app list `name`, or None if it isn't listed.
 
-    For "today" this is its priority group (P1-P3); for a search, "list".
+    For "today" this is its priority group (P1-P4); for a search, "list".
     Mirrors the list queries in common.py for a task already refreshed.
     """
     if name == "today":
         return required_priority(task, today) if in_today(task, today) else None
-    if name in ("p1", "p2", "p3"):
+    if name.upper() in PRIORITIES:
         listed = in_today(task, today) and current_priority(task.tags) == name.upper()
     elif name == "overdue":
         listed = task.deadline is not None and task.deadline < today
@@ -390,17 +414,36 @@ def sequence_place(project_tasks: Iterable[Task], task_id: str, completed: int) 
     return completed + position, completed + len(ordered)
 
 
-def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change]:
+def sequence_kind(project_tags: Iterable[str]) -> Optional[str]:
+    """Return the project's sequence kind (SEQUENTIAL_TAG or NEXT_UP_TAG), or None if neither.
+
+    A project tagged both is Sequential (plan_project_tags removes Next Up).
+    """
+    tags = set(project_tags)
+    return next((kind for kind in SEQUENCE_TAGS if kind in tags), None)
+
+
+def plan_project_tags(project_id: str, project_tags: List[str]) -> Optional[ProjectChange]:
+    """Return the change that removes Next Up from a project also tagged Sequential, if needed."""
+    if SEQUENTIAL_TAG not in project_tags or NEXT_UP_TAG not in project_tags:
+        return None
+    return ProjectChange(project_id, [t for t in project_tags if t != NEXT_UP_TAG])
+
+
+def plan_sequence(project_tasks: Iterable[Task], today: date, kind: str = SEQUENTIAL_TAG) -> Optional[Change]:
     """Return the change that puts a sequential project's next task in Today, if needed.
 
     The task in progress (sequence_next) gets a start date of today when it
     has none. While it is open nothing else is pulled in; once it is done the
-    next undated task is.
+    next undated task is. A Next Up project's task is tagged P4 in the same
+    write; a Sequential project's task keeps its tags (refresh rule 3 makes it P2).
     """
     task = sequence_next(project_tasks, today)
     if task is None or task.start_date is not None:
         return None
-    return Change(task_id=task.uuid, tags=None, set_start_date=today)
+    priority = SEQUENCE_PRIORITY.get(kind)
+    tags = _with_priority(task.tags, priority) if priority else None
+    return Change(task_id=task.uuid, tags=tags, set_start_date=today)
 
 
 def find_pulled(project_tasks: Iterable[Task], task_id: str, started_on: date) -> Optional[Task]:

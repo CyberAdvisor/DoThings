@@ -3,9 +3,14 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): Reads Next Up projects with the Sequential ones, and
+  project tags (read_sequence_project_tags, read_project_tags);
+  things:///update-project URL and confirmed project tag change
+  (apply_project_change), sharing the send-and-confirm loop with apply_change;
+  P4 search; APP_LISTS derived from PRIORITIES.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -28,9 +33,9 @@ import time
 import urllib.parse
 from collections import Counter
 from datetime import date, datetime
-from typing import Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from priority_check import PRIORITIES, Change, Task
+from priority_check import PRIORITIES, SEQUENCE_TAGS, Change, ProjectChange, Task
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
@@ -68,11 +73,8 @@ TYPE_TODO, TYPE_PROJECT, TYPE_HEADING = 0, 1, 2
 STATUS_OPEN, STATUS_COMPLETED = 0, 3
 START_INBOX, START_ANYTIME, START_SOMEDAY = 0, 1, 2
 
-# A project with this tag in Things is worked in order: only its next task shows in Today.
-SEQUENTIAL_TAG = "Sequential"
-
 # Lists Do Things shows itself: Today, then the custom searches.
-APP_LISTS = ("today", "p1", "p2", "p3", "overdue")
+APP_LISTS = ("today",) + tuple(p.lower() for p in PRIORITIES) + ("overdue",)
 # Built-in Things lists that the sidebar opens in Things (things:///show?id=<list>).
 THINGS_LISTS = ("inbox", "upcoming", "anytime", "someday", "logbook")
 
@@ -208,11 +210,10 @@ _ACTIVE = (
 
 def _row_to_task(row: sqlite3.Row) -> Task:
     """Convert a task query row into a Task."""
-    tags = row["tag_titles"].split(chr(31)) if row["tag_titles"] else []
     return Task(
         uuid=row["uuid"],
         title=row["title"] or "",
-        tags=tags,
+        tags=_split_tags(row["tag_titles"]),
         start_date=unpack_things_date(row["startDate"]),
         deadline=unpack_things_date(row["deadline"]),
         context=row["context"] or "",
@@ -253,7 +254,7 @@ def _list_query(name: str, today: int) -> Tuple[str, list, str]:
     """
     if name == "today":
         return _TODAY_CLAUSE, [today, today], "t.todayIndex, t.\"index\""
-    if name in ("p1", "p2", "p3"):
+    if name.upper() in PRIORITIES:
         # Tasks in Today with the tag: a task tagged for a later start shows once it starts.
         where = (
             f"{_TODAY_CLAUSE} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
@@ -282,26 +283,70 @@ def read_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return _row_to_task(row) if row else None
 
 
+# Placeholders for the sequence tags (Sequential, Next Up) in an SQL IN list.
+_SEQUENCE_TAG_PLACEHOLDERS = ", ".join("?" for _ in SEQUENCE_TAGS)
+
+
 def read_sequential_projects(conn: sqlite3.Connection) -> Dict[str, List[Task]]:
-    """Return {project id: its open to-dos} for every open project tagged Sequential.
+    """Return {project id: its open to-dos} for every open project tagged Sequential or Next Up.
 
     Covers each whole project (not only Today), so the sequence can be worked
     out; to-dos under closed headings are left out.
     """
     sequential = (
         "EXISTS (SELECT 1 FROM TMTaskTag st JOIN TMTag sg ON sg.uuid = st.tags "
-        f"WHERE st.tasks = COALESCE(t.project, h.project) AND sg.title = '{SEQUENTIAL_TAG}')"
+        f"WHERE st.tasks = COALESCE(t.project, h.project) AND sg.title IN ({_SEQUENCE_TAG_PLACEHOLDERS}))"
     )
     open_parents = (
         f"COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
         f"AND COALESCE(hp.status, {STATUS_OPEN}) = {STATUS_OPEN}"
     )
     projects: Dict[str, List[Task]] = {}
-    rows = conn.execute(f"{_TASK_SELECT} AND t.status = {STATUS_OPEN} AND {open_parents} AND {sequential}")
+    rows = conn.execute(
+        f"{_TASK_SELECT} AND t.status = {STATUS_OPEN} AND {open_parents} AND {sequential}", SEQUENCE_TAGS
+    )
     for row in rows:
         task = _row_to_task(row)
         projects.setdefault(task.project_id, []).append(task)
     return projects
+
+
+def _project_tags_query(where: str) -> str:
+    """Return a query for (uuid, tag_titles) of open, untrashed projects matching `where`.
+
+    Tags are joined with the ASCII unit separator, as in _TASK_SELECT.
+    """
+    return (
+        "SELECT p.uuid, (SELECT group_concat(tg.title, char(31)) FROM TMTaskTag tt "
+        "JOIN TMTag tg ON tg.uuid = tt.tags WHERE tt.tasks = p.uuid) AS tag_titles "
+        f"FROM TMTask p WHERE p.type = {TYPE_PROJECT} AND p.status = {STATUS_OPEN} AND p.trashed = 0 "
+        f"AND {where}"
+    )
+
+
+def _split_tags(tag_titles: Optional[str]) -> List[str]:
+    """Split a unit-separator-joined tag list from a query; None means no tags."""
+    return tag_titles.split(chr(31)) if tag_titles else []
+
+
+def read_sequence_project_tags(conn: sqlite3.Connection) -> Dict[str, List[str]]:
+    """Return {project id: its tags} for every open project tagged Sequential or Next Up.
+
+    Unlike read_sequential_projects, projects with no open to-dos are included,
+    so a project tagged both can have Next Up removed even when it is empty.
+    """
+    where = (
+        "EXISTS (SELECT 1 FROM TMTaskTag st JOIN TMTag sg ON sg.uuid = st.tags "
+        f"WHERE st.tasks = p.uuid AND sg.title IN ({_SEQUENCE_TAG_PLACEHOLDERS}))"
+    )
+    rows = conn.execute(_project_tags_query(where), SEQUENCE_TAGS)
+    return {row["uuid"]: _split_tags(row["tag_titles"]) for row in rows}
+
+
+def read_project_tags(conn: sqlite3.Connection, project_id: str) -> Optional[List[str]]:
+    """Return an open, untrashed project's tags, or None if there is no such project."""
+    row = conn.execute(_project_tags_query("p.uuid = ?"), [project_id]).fetchone()
+    return _split_tags(row["tag_titles"]) if row else None
 
 
 def _completed_in_projects(conn: sqlite3.Connection, project_ids: Iterable[str]) -> List[sqlite3.Row]:
@@ -402,17 +447,30 @@ def is_valid_task_id(task_id: object) -> bool:
     return isinstance(task_id, str) and bool(TASK_ID_RE.match(task_id))
 
 
+def _tags_param(tags: List[str]) -> str:
+    """Join tags for a URL command's `tags` parameter.
+
+    Raises ValueError if a tag contains a comma, because the URL scheme uses
+    commas to separate tags and the tags would be split incorrectly.
+    """
+    if any("," in tag for tag in tags):
+        raise ValueError(f"Tag containing a comma cannot be written: {tags!r}")
+    return ",".join(tags)
+
+
+def _things_url(command: str, params: Dict[str, str]) -> str:
+    """Build a things:///<command> URL; commas are left as-is to separate tags."""
+    return f"things:///{command}?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe=",")
+
+
 def build_update_url(change: Change, token: str) -> str:
     """Build the things:///update URL that applies `change`.
 
-    Raises ValueError if a tag contains a comma, because the URL scheme uses
-    commas to separate tags and the task's tags would be split incorrectly.
+    Raises ValueError if a tag contains a comma (see _tags_param).
     """
     params = {"id": change.task_id, "auth-token": token}
     if change.tags is not None:
-        if any("," in tag for tag in change.tags):
-            raise ValueError(f"Tag containing a comma cannot be written: {change.tags!r}")
-        params["tags"] = ",".join(change.tags)
+        params["tags"] = _tags_param(change.tags)
     if change.set_deadline is not None:
         params["deadline"] = change.set_deadline.isoformat()
     elif change.clear_deadline:
@@ -431,7 +489,16 @@ def build_update_url(change: Change, token: str) -> str:
         params["heading-id"] = change.set_heading_id
     if change.set_completed is not None:
         params["completed"] = "true" if change.set_completed else "false"
-    return "things:///update?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe=",")
+    return _things_url("update", params)
+
+
+def build_update_project_url(change: ProjectChange, token: str) -> str:
+    """Build the things:///update-project URL that replaces a project's tags.
+
+    Raises ValueError if a tag contains a comma (see _tags_param).
+    """
+    params = {"id": change.project_id, "auth-token": token, "tags": _tags_param(change.tags)}
+    return _things_url("update-project", params)
 
 
 def build_show_url(target_id: str) -> str:
@@ -476,11 +543,40 @@ def apply_change(change: Change, token: str, db_path: str) -> bool:
 
     Returns True only when the re-read task matches the change.
     """
+    def confirmed(conn: sqlite3.Connection) -> bool:
+        task = read_task(conn, change.task_id)
+        return task is not None and change.is_satisfied_by(task)
+
+    return _send_and_confirm(lambda: build_update_url(change, token), confirmed, f"task {change.task_id}", db_path)
+
+
+def apply_project_change(change: ProjectChange, token: str, db_path: str) -> bool:
+    """Send a project tag change to Things and wait until the database confirms it.
+
+    Returns True only when the re-read project has exactly the new tags.
+    """
+    def confirmed(conn: sqlite3.Connection) -> bool:
+        tags = read_project_tags(conn, change.project_id)
+        return tags is not None and change.is_satisfied_by(tags)
+
+    return _send_and_confirm(
+        lambda: build_update_project_url(change, token), confirmed, f"project {change.project_id}", db_path
+    )
+
+
+def _send_and_confirm(
+    build_url: Callable[[], str], confirmed: Callable[[sqlite3.Connection], bool], what: str, db_path: str
+) -> bool:
+    """Open the URL `build_url` returns, then re-read the database until `confirmed` holds.
+
+    `what` names the task or project in log lines. Returns False (and logs) if
+    the URL can't be built or opened, or Things doesn't confirm in time.
+    """
     logger = get_logger()
     try:
-        url = build_update_url(change, token)
+        url = build_url()
     except ValueError as error:
-        logger.error("Skipped task %s: %s", change.task_id, error)
+        logger.error("Skipped %s: %s", what, error)
         return False
     if not open_things_url(url, background=True):
         return False
@@ -489,16 +585,13 @@ def apply_change(change: Change, token: str, db_path: str) -> bool:
         time.sleep(CONFIRM_POLL_SECONDS)
         try:
             with open_things_db(db_path) as conn:
-                task = read_task(conn, change.task_id)
+                if confirmed(conn):
+                    return True
         except sqlite3.Error as error:
-            logger.warning("Could not re-read task %s: %s", change.task_id, error)
-            continue
-        if task is not None and change.is_satisfied_by(task):
-            return True
+            logger.warning("Could not re-read %s: %s", what, error)
     logger.error(
-        "Things did not confirm the change to task %s (wrong auth token, missing tag, "
-        "or Things not running)",
-        change.task_id,
+        "Things did not confirm the change to %s (wrong auth token, missing tag, or Things not running)",
+        what,
     )
     return False
 

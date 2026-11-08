@@ -1,14 +1,16 @@
 """Read-only diagnostic for Do Things.
 
 Prints where the Things database is, whether the columns Do Things relies on
-exist, whether the P1-P3 tags exist, and every Today task with its tags,
+exist, whether the P1-P4 tags exist, and every Today task with its tags,
 dates, completion, project order, required priority and the change the refresh rules
-would make, plus each sequential project's task in progress.
+would make, plus each sequential (Sequential or Next Up) project's kind and task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): Shows each project's kind (Sequential or Next Up) and
+  flags projects tagged both.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -24,10 +26,20 @@ from common import (
     missing_priority_tags,
     open_things_db,
     read_list,
+    read_sequence_project_tags,
     read_sequential_projects,
     today_local,
 )
-from priority_check import Change, find_pulled, plan_refresh, plan_sequence, required_priority, sequence_next
+from priority_check import (
+    Change,
+    find_pulled,
+    plan_project_tags,
+    plan_refresh,
+    plan_sequence,
+    required_priority,
+    sequence_kind,
+    sequence_next,
+)
 
 # Columns the queries in common.py depend on.
 REQUIRED_COLUMNS = {
@@ -87,9 +99,15 @@ def run() -> None:
         print(f"Priority tags missing in Things: {', '.join(missing) if missing else 'none'}")
         tasks = read_list(conn, "today", today)
         projects = read_sequential_projects(conn)
+        project_tags = read_sequence_project_tags(conn)
     pulls = load_pulls()
-    print(f"\nSequential projects: {len(projects)}")
+    print(f"\nSequential and Next Up projects: {len(projects)}")
     for project, project_tasks in projects.items():
+        tags = project_tags.get(project, [])
+        kind = sequence_kind(tags)
+        label = kind
+        if plan_project_tags(project, tags) is not None:
+            label = f"{kind}; also tagged Next Up, which the refresh removes"
         record = pulls.get(project)
         recorded = find_pulled(project_tasks, record.task, record.started_on) if record else None
         if recorded is not None:
@@ -97,9 +115,9 @@ def run() -> None:
             state = f"in progress (recorded, after {record.after or 'none'}): {recorded.title!r}"
         else:
             current = sequence_next(project_tasks, today)
-            planned = describe_change(plan_sequence(project_tasks, today) or Change("", None))
+            planned = describe_change(plan_sequence(project_tasks, today, kind) or Change("", None))
             state = f"next by order: {current.title if current else 'none'!r}; planned={planned or 'no change'}"
-        print(f"- {project_tasks[0].context!r}: {len(project_tasks)} open; {state}")
+        print(f"- {project_tasks[0].context!r} [{label}]: {len(project_tasks)} open; {state}")
     print(f"\nToday tasks: {len(tasks)}")
     for task in tasks:
         change = plan_refresh(task, today)

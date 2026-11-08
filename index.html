@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.0.3
+  Version: 1.1.0
 
   Change log:
+  - v1.1.0 (2026-11-08): P4 · Next Up search in the sidebar; Today's Next Up
+    group comes from the server; the editor's priority choices and the
+    missing-tag message use the priorities the server sends.
   - v1.0.3 (2026-11-07): Synchronized module version metadata.
   - v1.0.2 (2026-11-07): Synchronized module version metadata.
   - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -255,6 +258,7 @@ const LISTS = [
   { id: "p1", name: "P1 · Due Today", icon: "search" },
   { id: "p2", name: "P2 · To Do", icon: "search" },
   { id: "p3", name: "P3 · Follow Up", icon: "search" },
+  { id: "p4", name: "P4 · Next Up", icon: "search" },
   { id: "overdue", name: "Overdue", icon: "search" },
 ];
 const REFRESH_MS = 60000;
@@ -268,6 +272,7 @@ const state = {
   status: "",     // Message above the list; kept across redraws until replaced.
   edit: null,     // The open inline editor (see startEdit), or null.
   counts: null,   // Sidebar counts from the last list response: {inbox, today: {due, not_due}}.
+  priorities: [], // Priority tags, highest first, from the last list response (the editor's choices).
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
   theme: loadSetting("theme", "dark"), // Appearance: "dark" (default) or "light".
   version: "",
@@ -489,11 +494,16 @@ function writeFailedMessage(what) {
   return `Things didn't apply ${what}. Check: ` + WRITE_FAILED_STEPS.map((s, i) => `${i + 1}. ${s}`).join(" ");
 }
 
+/** Join names for a sentence: "P1, P2, P3 and P4". */
+function joinNames(names) {
+  return names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 /** Add warnings about missing tags or an unconfirmed write. */
 function renderBanners(content, data) {
   if (data.missing_tags && data.missing_tags.length) {
     content.append(stepsBanner(
-      `Do Things needs tags named P1, P2 and P3 in Things. Missing: ${data.missing_tags.join(", ")}. ` +
+      `Do Things needs tags named ${joinNames(data.priorities)} in Things. Missing: ${data.missing_tags.join(", ")}. ` +
       "Until they exist, Do Things won't change any tags.",
       [
         "In Things, open Window › Tags.",
@@ -838,7 +848,7 @@ function buildEditor() {
   }
 
   const seg = el("span", "seg");
-  for (const p of ["P1", "P2", "P3"]) {
+  for (const p of state.priorities) {
     const button = el("button", p === draft.priority ? "on" : "", p);
     button.type = "button";
     button.disabled = locked;
@@ -1257,6 +1267,7 @@ async function load() {
     if (blocked() || state.list !== list) return;
     if (!data.token_set) { showSetup(true); return; }
     state.counts = data.counts;
+    state.priorities = data.priorities;
     renderSidebar(); // Again, now with the fresh counts.
     renderList(data);
   } catch (error) {

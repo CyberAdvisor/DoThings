@@ -1,8 +1,9 @@
 # Creates the vX.Y.Z tag and GitHub release for each new version pushed to main.
 #
-# Version: 1.0.3
+# Version: 1.1.0
 #
 # Change log:
+# - v1.1.0 (2026-11-08): Synchronized module version metadata.
 # - v1.0.3 (2026-11-07): Synchronized module version metadata.
 # - v1.0.2 (2026-11-07): Synchronized module version metadata.
 # - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.

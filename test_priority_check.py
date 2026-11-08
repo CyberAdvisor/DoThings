@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): Tests for P4, Next Up projects and the project tag
+  change.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -13,7 +15,10 @@ import unittest
 from datetime import date, timedelta
 
 from priority_check import (
+    NEXT_UP_TAG,
+    SEQUENTIAL_TAG,
     Change,
+    ProjectChange,
     Task,
     TaskEdit,
     apply_order,
@@ -28,12 +33,14 @@ from priority_check import (
     plan_completion,
     plan_edit,
     plan_move,
+    plan_project_tags,
     plan_refresh,
     plan_sequence,
     plan_sequence_undo,
     predict,
     prune_order,
     required_priority,
+    sequence_kind,
     sequence_next,
     sequence_place,
     today_counts,
@@ -215,6 +222,60 @@ class SequenceTests(unittest.TestCase):
     def test_nothing_to_do(self) -> None:
         self.assertIsNone(plan_sequence([], TODAY))
         self.assertIsNone(plan_sequence([in_project("due", "S", (0, 0, 1), deadline=TODAY)], TODAY))
+
+
+class NextUpTests(unittest.TestCase):
+    """P4 (Next Up): the lowest priority, and Next Up projects that start their task as P4."""
+
+    def test_p4_is_lowest(self) -> None:
+        self.assertEqual(required_priority(make_task(tags=["P4"]), TODAY), "P4")
+        self.assertEqual(required_priority(make_task(tags=["P4", "P3"]), TODAY), "P3")
+        self.assertEqual(required_priority(make_task(tags=["P4"], deadline=YESTERDAY), TODAY), "P1")
+        change = plan_refresh(make_task(tags=["P4", "P2"]), TODAY)
+        self.assertEqual(change.tags, ["P2"])
+
+    def test_moves_into_and_out_of_p4(self) -> None:
+        # Out of P1: a deadline of today goes and the task stays in Today.
+        change = plan_move(make_task(tags=["P1"], deadline=TODAY), "P4", TODAY)
+        self.assertEqual((change.tags, change.clear_deadline, change.set_start_date), (["P4"], True, TODAY))
+        # Among P2-P4 the deadline is left alone; a later deadline is always kept.
+        change = plan_move(make_task(tags=["P2"], deadline=TOMORROW, start_date=TODAY), "P4", TODAY)
+        self.assertEqual((change.tags, change.clear_deadline, change.set_deadline), (["P4"], False, None))
+        change = plan_move(make_task(tags=["P4"], start_date=TODAY), "P1", TODAY)
+        self.assertEqual((change.tags, change.set_deadline), (["P1"], TODAY))
+
+    def test_p4_search(self) -> None:
+        task = make_task(tags=["P4"], start_date=TODAY)
+        self.assertEqual(place_in_list(task, "p4", TODAY), "list")
+        self.assertIsNone(place_in_list(task, "p3", TODAY))
+        self.assertEqual(place_in_list(task, "today", TODAY), "P4")
+
+    def test_sequence_kind(self) -> None:
+        self.assertEqual(sequence_kind(["Home", SEQUENTIAL_TAG]), SEQUENTIAL_TAG)
+        self.assertEqual(sequence_kind([NEXT_UP_TAG]), NEXT_UP_TAG)
+        self.assertEqual(sequence_kind([NEXT_UP_TAG, SEQUENTIAL_TAG]), SEQUENTIAL_TAG)  # Sequential wins.
+        self.assertIsNone(sequence_kind(["Home"]))
+
+    def test_next_up_removed_when_also_sequential(self) -> None:
+        change = plan_project_tags("proj", ["Home", NEXT_UP_TAG, SEQUENTIAL_TAG])
+        self.assertEqual(change, ProjectChange("proj", ["Home", SEQUENTIAL_TAG]))
+        self.assertTrue(change.is_satisfied_by([SEQUENTIAL_TAG, "Home"]))
+        self.assertFalse(change.is_satisfied_by(["Home", NEXT_UP_TAG, SEQUENTIAL_TAG]))
+        self.assertIsNone(plan_project_tags("proj", [NEXT_UP_TAG]))
+        self.assertIsNone(plan_project_tags("proj", [SEQUENTIAL_TAG]))
+
+    def test_next_up_task_started_as_p4(self) -> None:
+        tasks = [in_project("first", "N", (0, 0, 1), tags=["Books", "P2"]), in_project("second", "N", (0, 0, 2))]
+        change = plan_sequence(tasks, TODAY, NEXT_UP_TAG)
+        self.assertEqual((change.task_id, change.set_start_date, change.tags), ("first", TODAY, ["Books", "P4"]))
+        self.assertTrue(change.is_satisfied_by(in_project("first", "N", (0, 0, 1), tags=["P4", "Books"], start_date=TODAY)))
+        # A Sequential project's task keeps its tags (refresh rule 3 makes it P2).
+        self.assertIsNone(plan_sequence(tasks, TODAY, SEQUENTIAL_TAG).tags)
+
+    def test_undo_removes_p4(self) -> None:
+        reopened = in_project("first", "N", (0, 0, 9), start_date=TODAY)
+        pulled = in_project("second", "N", (0, 0, 2), tags=["Books", "P4"], start_date=TODAY)
+        self.assertEqual(plan_sequence_undo([pulled, reopened], pulled, "first").tags, ["Books"])
 
 
 class TodayCountsTests(unittest.TestCase):
@@ -431,7 +492,7 @@ class PlanMoveTests(unittest.TestCase):
 
     def test_unknown_destination_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            plan_move(make_task(), "P4", TODAY)
+            plan_move(make_task(), "P5", TODAY)
 
 
 class ChangeConfirmationTests(unittest.TestCase):
@@ -481,7 +542,7 @@ class OrderingTests(unittest.TestCase):
     def test_update_order_removes_ids_from_other_groups(self) -> None:
         order = {"P1": ["A", "B"], "P2": ["C"]}
         self.assertEqual(
-            update_order(order, "P2", ["B", "C"]), {"P1": ["A"], "P2": ["B", "C"], "P3": []}
+            update_order(order, "P2", ["B", "C"]), {"P1": ["A"], "P2": ["B", "C"], "P3": [], "P4": []}
         )
 
     def test_update_order_rejects_unknown_priority(self) -> None:
@@ -546,7 +607,7 @@ class PredictTests(unittest.TestCase):
 
     def test_prune_order(self) -> None:
         order = {"P1": ["a", "gone"], "P3": ["b"]}
-        self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"]})
+        self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"], "P4": []})
 
 
 if __name__ == "__main__":

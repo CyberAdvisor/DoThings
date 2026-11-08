@@ -5,9 +5,9 @@ Guide for contributors and AI agents working on this repository.
 ## Project shape
 - A local web app that adds a prioritized Today view in front of Things 3.
 - `serve.py` is a Python standard-library HTTP server bound to `127.0.0.1:8765`. It serves the single-file page `index.html` and a JSON API.
-- Reads come from the Things SQLite database, opened read-only. Writes go through `things:///update` URLs handed to macOS `open -g`, authorized by the user's Things auth token.
+- Reads come from the Things SQLite database, opened read-only. Writes go through `things:///update` URLs (and `things:///update-project`, only to remove `Next Up` from a project also tagged `Sequential`) handed to macOS `open -g`, authorized by the user's Things auth token.
 - All logic lives in Python. `index.html` only renders lists and sends actions. Where the page needs a rule's result before saving (the inline editor's dates, priority and the row after Save), it asks `POST /api/edit/preview`; it never re-implements a rule.
-- The refresh rules run on every list request (page load, window focus, every 60 seconds), not on a schedule. Sequential projects are stepped first (`step_sequences`), then each Today task gets `plan_refresh`.
+- The refresh rules run on every list request (page load, window focus, every 60 seconds), not on a schedule. Sequential and Next Up projects are stepped first (`step_sequences`, which first removes `Next Up` from projects also tagged `Sequential`), then each Today task gets `plan_refresh`.
 - Target: Python 3.9 (macOS Command Line Tools), standard library only. Times use the Mac's own time zone (`today_local`, `start_of_day`); deviation from the project standard's Mountain Time, so Do Things works for anyone who downloads it.
 - Workflow: change → test → commit → push, in the single folder `~/Documents/Projects/DoThings`.
 - Releases (deviation from the project standard): do not create tags or releases by hand. Bump `VERSION`, make the commit subject `vX.Y.Z: <summary>` and its body the release notes (version, user-visible behavior, safety impact, verification), and push to `main`; `.github/workflows/release.yml` tags that commit and publishes the release. The workflow file lives in `.github/workflows/` because GitHub requires it there.
@@ -16,8 +16,8 @@ Guide for contributors and AI agents working on this repository.
 ## Files
 | File | Purpose |
 |---|---|
-| `common.py` | Paths (`*_PATH`), `PROJECT_VERSION`, size-capped logger, Things date packing, read-only DB queries (lists, task, sequential projects, edit options, counts, checklist progress), URL building and sending, change confirmation, order and sequence-record files, auth token |
-| `priority_check.py` | Pure rules and the `Task`, `Change` and `TaskEdit` models: `required_priority`, `plan_refresh`, `plan_move`, `plan_edit`, `plan_completion`, sequential projects (`plan_sequence`, `plan_sequence_undo`), `predict` and `place_in_list` (an edit's result and where it is listed), grouping, ordering (`update_order`, `prune_order`) and counts |
+| `common.py` | Paths (`*_PATH`), `PROJECT_VERSION`, size-capped logger, Things date packing, read-only DB queries (lists, task, sequential projects and their tags, edit options, counts, checklist progress), URL building and sending, change confirmation for tasks and projects, order and sequence-record files, auth token |
+| `priority_check.py` | Pure rules and the `Task`, `Change`, `ProjectChange` and `TaskEdit` models: `required_priority`, `plan_refresh`, `plan_move`, `plan_edit`, `plan_completion`, Sequential and Next Up projects (`sequence_kind`, `plan_project_tags`, `plan_sequence`, `plan_sequence_undo`), `predict` and `place_in_list` (an edit's result and where it is listed), grouping, ordering (`update_order`, `prune_order`) and counts |
 | `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, edit, edit preview, refresh retry, open in Things, token), refresh pause, row JSON |
 | `debug_things.py` | Read-only diagnostic entry point |
 | `index.html` | Page: sidebar with counts, Hide Completed and Settings; Things-style rows; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar; Settings and token setup |
@@ -29,9 +29,10 @@ Guide for contributors and AI agents working on this repository.
 ## Safety-critical behavior
 Do not weaken any of these without explicit approval:
 - **Never write to the Things database directly.** It is opened with `mode=ro`. All changes go through the URL scheme.
-- **Confirm before recording.** `apply_change` re-reads the task until `Change.is_satisfied_by` passes (5 s timeout). The order file is saved only after a move is confirmed.
+- **Confirm before recording.** `apply_change` re-reads the task until `Change.is_satisfied_by` passes, and `apply_project_change` re-reads the project's tags until `ProjectChange.is_satisfied_by` passes (5 s timeout each). The order file is saved only after a move is confirmed.
 - **Stop on failure.** `apply_refresh_rules` stops at the first unconfirmed write in a refresh, and `RefreshPause` then skips automatic writes until the user clicks Retry, saves a new token or restarts the server. Manual changes are always tried and report their own failure.
 - **Previews never write.** `POST /api/edit/preview` reads only; it needs no token.
+- **Projects are changed only to remove `Next Up` from a project also tagged `Sequential`,** with its full remaining tag list. Nothing in a sequence is started until that change is confirmed.
 - **Sequential undo only touches tasks Do Things started.** `sequence_pulls.json` records each start with the task it followed; a record is acted on only while the task still has the recorded start date.
 - **Keep non-priority tags.** `tags=` replaces all tags, so every change that sets tags carries the full tag list (`Change.tags` None sends no `tags=` at all). Tags containing commas are refused, not split.
 - **Only send what Things will apply.** Writes Things would silently ignore (unknown tags, values not in Things' own data) are refused with a message before sending, so an unconfirmed write always means a real problem.
@@ -46,10 +47,11 @@ Do not weaken any of these without explicit approval:
 - Rules belong in `priority_check.py` and must stay free of I/O so they can be tested.
 - Database, file and command access belong in `common.py`. `serve.py` only wires requests to them.
 - All paths are `*_PATH` constants in `common.py` built from `BASE_DIR`.
-- New sidebar searches: add the id to `APP_LISTS` and a branch in `_list_query` (`common.py`), the same membership in `place_in_list` (`priority_check.py`), an entry to `LISTS` in `index.html`, and tests in `test_common.py` and `test_priority_check.py`. The P1–P3 searches are Today plus the tag.
+- New sidebar searches: add the id to `APP_LISTS` and a branch in `_list_query` (`common.py`), the same membership in `place_in_list` (`priority_check.py`), an entry to `LISTS` in `index.html`, and tests in `test_common.py` and `test_priority_check.py`. The P1–P4 searches are Today plus the tag; `APP_LISTS` and `_list_query` derive them from `PRIORITIES`.
 - The page updates optimistically and sends changes one at a time through `enqueue`; the list is redrawn from Things once the queue is empty. `load()` must not draw over an editor, drag or change started while its request was running.
 - Browser-only settings (Hide Completed, appearance) live in `localStorage`; wrap access in try/catch.
 - Things' own lists (Inbox, Upcoming, Anytime, Someday, Logbook) are not queried: they are in `THINGS_LISTS` and open in Things via `/api/show-list`. Mark such entries `things: true` in `LISTS`.
+- Priorities: `PRIORITIES` and `PRIORITY_LABELS` in `priority_check.py` drive the Today groups, searches, saved order and the editor's choices (the list response sends `priorities` to the page). A new priority also needs an entry in `LISTS` in `index.html` and the README.
 - Never send a write while a P tag is missing in Things (`missing_priority_tags`): Things drops unknown tags silently, so the write can't be confirmed and looks like a token failure.
 - Things stores `startDate` and `deadline` as packed integers (`year<<16 | month<<12 | day<<7`). Use `pack_things_date` and `unpack_things_date`.
 

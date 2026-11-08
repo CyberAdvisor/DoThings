@@ -3,9 +3,11 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): Tests for Next Up projects (P4 start, Next Up group and
+  search, tag removal, pause, missing P4) and moves to P4; P4 tag in fixtures.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -70,6 +72,7 @@ class MockThingsTestCase(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.apply_change = mock.patch.object(serve, "apply_change", return_value=True).start()
+        self.apply_project_change = mock.patch.object(serve, "apply_project_change", return_value=True).start()
         self.addCleanup(mock.patch.stopall)
 
     def tearDown(self) -> None:
@@ -86,12 +89,12 @@ class MissingTagTests(MockThingsTestCase):
 
     def test_refresh_skipped_while_tags_missing(self) -> None:
         response = serve.list_response("today")
-        self.assertEqual(response["missing_tags"], ["P2", "P3"])
+        self.assertEqual(response["missing_tags"], ["P2", "P3", "P4"])
         self.assertFalse(response["refresh_paused"])
         self.apply_change.assert_not_called()
 
     def test_refresh_runs_once_tags_exist(self) -> None:
-        self.add_tags("P2", "P3")
+        self.add_tags("P2", "P3", "P4")
         response = serve.list_response("today")
         self.assertEqual(response["missing_tags"], [])
         self.apply_change.assert_called_once()
@@ -114,7 +117,7 @@ class RefreshPauseTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3")
+        self.add_tags("P2", "P3", "P4")
         self.apply_change.return_value = False
 
     def test_failure_pauses_and_retry_resumes(self) -> None:
@@ -145,7 +148,7 @@ class OrderPruneTests(MockThingsTestCase):
     def test_gone_ids_dropped(self) -> None:
         with mock.patch.object(serve, "load_order", return_value={"P2": ["gone", "task1"]}):
             serve.list_response("p1")
-        serve.save_order.assert_called_once_with({"P1": [], "P2": ["task1"], "P3": []})
+        serve.save_order.assert_called_once_with({"P1": [], "P2": ["task1"], "P3": [], "P4": []})
 
     def test_nothing_saved_when_all_present(self) -> None:
         with mock.patch.object(serve, "load_order", return_value={"P2": ["task1"]}):
@@ -157,7 +160,7 @@ class StartDateRefreshTests(MockThingsTestCase):
     """A refresh gives tasks with no start date that are due today a start date of today."""
 
     def test_inbox_anytime_and_someday_tasks_due_today(self) -> None:
-        self.add_tags("P2", "P3")
+        self.add_tags("P2", "P3", "P4")
         due = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.executemany(
@@ -195,7 +198,7 @@ class ProjectTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "Sequential")
+        self.add_tags("P2", "P3", "P4", "Sequential")
         started = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
@@ -337,6 +340,75 @@ class ProjectTests(MockThingsTestCase):
         self.assertEqual(self.started(), ["s2", "s1"])
 
 
+class NextUpTests(MockThingsTestCase):
+    """Next Up projects start their next task as P4, shown in Today's Next Up group."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3", "P4", "Sequential", "Next Up")
+        with write_db(self.db_path) as conn:
+            conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") VALUES (?, ?, 1, 0, 0, 0)",
+                [("books", "Books"), ("both", "Both")],
+            )
+            conn.executemany(
+                "INSERT INTO TMTaskTag VALUES (?, ?)",
+                [("books", "Next Up"), ("both", "Sequential"), ("both", "Next Up")],
+            )
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, project, \"index\") "
+                f"VALUES (?, ?, 0, 0, 0, {START_ANYTIME}, ?, ?)",
+                [("b1", "Book 1", "books", 1), ("b2", "Book 2", "books", 2), ("x1", "Both 1", "both", 1)],
+            )
+
+    def starts(self) -> dict:
+        """{task id: tags sent} for each task the refresh gave a start date of today."""
+        return {c[0][0].task_id: c[0][0].tags for c in self.apply_change.call_args_list
+                if c[0][0].set_start_date == TODAY}
+
+    def test_next_up_task_started_as_p4_and_shown_in_its_group(self) -> None:
+        serve.list_response("today")
+        self.assertEqual(self.starts(), {"b1": ["P4"], "x1": None})
+        with write_db(self.db_path) as conn:  # As Things applied the start.
+            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b1'", (pack_things_date(TODAY),))
+            conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
+        self.apply_change.reset_mock()
+        response = serve.list_response("today")
+        self.assertEqual(self.starts(), {"x1": None})  # b1 is in progress; nothing else from Books.
+        self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4"])
+        last = response["groups"][-1]
+        self.assertEqual((last["priority"], last["label"]), ("P4", "Next Up"))
+        self.assertEqual([(t["id"], t["sequence"], t["tags"]) for t in last["tasks"]], [("b1", "task 1 of 2", [])])
+        self.assertEqual([t["id"] for t in serve.list_response("p4")["tasks"]], ["b1"])
+
+    def test_next_up_removed_from_project_also_sequential(self) -> None:
+        serve.list_response("today")
+        change = self.apply_project_change.call_args[0][0]
+        self.assertEqual((change.project_id, change.tags), ("both", ["Sequential"]))
+        self.assertEqual(self.apply_project_change.call_count, 1)
+
+    def test_unconfirmed_project_change_pauses_updates(self) -> None:
+        self.apply_project_change.return_value = False
+        response = serve.list_response("today")
+        self.assertTrue(response["refresh_paused"])
+        self.apply_change.assert_not_called()  # Nothing is started until the tags are fixed.
+
+    def test_refresh_waits_for_p4_tag(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("DELETE FROM TMTag WHERE title = 'P4'")
+        response = serve.list_response("today")
+        self.assertEqual(response["missing_tags"], ["P4"])
+        self.apply_change.assert_not_called()
+        self.apply_project_change.assert_not_called()
+
+    def test_move_to_p4(self) -> None:
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b2'", (pack_things_date(TODAY),))
+        self.assertEqual(serve.move_task({"id": "b2", "priority": "P4", "order": ["b2"]}), {"ok": True})
+        self.assertEqual(self.apply_change.call_args[0][0].tags, ["P4"])
+
+
 class CompletionTests(MockThingsTestCase):
     """Completing and reopening tasks, and how completed tasks are listed."""
 
@@ -424,7 +496,7 @@ class EditTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "Home")
+        self.add_tags("P2", "P3", "P4", "Home")
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
             conn.executemany(
@@ -482,11 +554,11 @@ class EditTests(MockThingsTestCase):
         with mock.patch.object(serve, "load_order", return_value={"P1": ["x"], "P2": ["task1"]}):
             self.edit(priority="P1")
         self.assertEqual(self.sent().set_deadline, TODAY)
-        self.save_order.assert_called_once_with({"P1": ["x", "task1"], "P2": [], "P3": []})
+        self.save_order.assert_called_once_with({"P1": ["x", "task1"], "P2": [], "P3": [], "P4": []})
 
     def test_invalid_changes_rejected(self) -> None:
         for changes in ({"title": ""}, {"title": "two\nlines"}, {"when": "evening"}, {"deadline": "soon"},
-                        {"priority": "P4"}, {"tags": ["Nope"]}, {"list_id": "nosuch"},
+                        {"priority": "P5"}, {"tags": ["Nope"]}, {"list_id": "nosuch"},
                         {"heading_id": "head1"},  # task1 isn't in proj1
                         {"color": "red"}):
             with self.subTest(changes=changes), self.assertRaises(serve.ApiError):

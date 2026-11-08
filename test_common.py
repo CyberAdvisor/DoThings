@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): Tests for the P4 search, Next Up project queries, the
+  update-project URL and project change confirmation.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -38,7 +40,9 @@ from common import (
     STATUS_COMPLETED,
     STATUS_OPEN,
     THINGS_LISTS,
+    apply_project_change,
     build_show_url,
+    build_update_project_url,
     build_update_url,
     count_completed,
     count_inbox,
@@ -56,6 +60,8 @@ from common import (
     read_edit_options,
     read_last_completed,
     read_list,
+    read_project_tags,
+    read_sequence_project_tags,
     read_sequential_projects,
     read_task,
     save_order,
@@ -66,7 +72,7 @@ from common import (
     unpack_things_date,
     validate_token,
 )
-from priority_check import Change
+from priority_check import Change, ProjectChange
 
 TODAY = date(2026, 11, 7)
 
@@ -251,6 +257,16 @@ class UrlTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_update_url(Change("A1", ["a,b", "P2"]), "t")
 
+    def test_update_project_url(self) -> None:
+        url = build_update_project_url(ProjectChange("PR1", ["Home Office", "Sequential"]), "tok")
+        self.assertTrue(url.startswith("things:///update-project?"))
+        params = self._params(url)
+        self.assertEqual(params["id"], ["PR1"])
+        self.assertEqual(params["auth-token"], ["tok"])
+        self.assertEqual(params["tags"], ["Home Office,Sequential"])
+        with self.assertRaises(ValueError):
+            build_update_project_url(ProjectChange("PR1", ["a,b"]), "t")
+
     def test_show_url(self) -> None:
         self.assertEqual(build_show_url("A1"), "things:///show?id=A1")
         for name in THINGS_LISTS:
@@ -418,6 +434,12 @@ class DatabaseTests(unittest.TestCase):
             conn.execute("INSERT INTO TMTaskTag VALUES ('today2', 't2')")
         self.assertEqual(self._ids("p1"), ["today1"])
         self.assertEqual(self._ids("p2"), ["today2"])
+        self.assertEqual(self._ids("p4"), [])
+        with write_db(self.path) as conn:
+            conn.execute("INSERT INTO TMTag VALUES ('t4', 'P4')")
+            conn.execute("INSERT INTO TMTaskTag VALUES ('today2', 't4')")
+            conn.execute("INSERT INTO TMTaskTag VALUES ('anytime', 't4')")  # Not in Today.
+        self.assertEqual(self._ids("p4"), ["today2"])
         self.assertEqual(self._ids("overdue"), ["overdue"])
 
     def test_todos_under_closed_or_trashed_parents_hidden(self) -> None:
@@ -529,6 +551,54 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(count_completed(conn, ["seq"]), {"seq": 2})
             self.assertEqual(count_completed(conn, ["proj1"]), {})
 
+    def add_next_up_projects(self) -> None:
+        """Add a Next Up project with a task, an empty project tagged both, and an untagged project."""
+        with write_db(self.path) as conn:
+            conn.executemany(
+                "INSERT INTO TMTag VALUES (?, ?)", [("tseq", "Sequential"), ("tnext", "Next Up"), ("thome", "Home")]
+            )
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") VALUES (?, ?, 1, 0, 0, 0)",
+                [("books", "Books"), ("both", "Both"), ("plain", "Plain")],
+            )
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, project, \"index\") "
+                f"VALUES ('b1', 'Book 1', 0, 0, 0, {START_ANYTIME}, 'books', 0)"
+            )
+            conn.executemany(
+                "INSERT INTO TMTaskTag VALUES (?, ?)",
+                [("books", "tnext"), ("books", "thome"), ("both", "tseq"), ("both", "tnext"), ("plain", "thome")],
+            )
+
+    def test_next_up_projects(self) -> None:
+        self.add_next_up_projects()
+        with open_things_db(self.path) as conn:
+            self.assertEqual({p: [t.uuid for t in ts] for p, ts in read_sequential_projects(conn).items()},
+                             {"books": ["b1"]})
+            # Every tagged project, even one with no to-dos; tags unordered.
+            tags = {p: sorted(t) for p, t in read_sequence_project_tags(conn).items()}
+            self.assertEqual(tags, {"books": ["Home", "Next Up"], "both": ["Next Up", "Sequential"]})
+            self.assertEqual(read_project_tags(conn, "plain"), ["Home"])
+            self.assertEqual(read_project_tags(conn, "proj1"), [])
+            self.assertIsNone(read_project_tags(conn, "today1"))  # A to-do, not a project.
+
+    def test_project_change_confirmed_by_database(self) -> None:
+        self.add_next_up_projects()
+
+        def things_applies(url: str, background: bool) -> bool:
+            with write_db(self.path) as conn:
+                conn.execute("DELETE FROM TMTaskTag WHERE tasks = 'both' AND tags = 'tnext'")
+            return True
+
+        change = ProjectChange("both", ["Sequential"])
+        with mock.patch("common.CONFIRM_POLL_SECONDS", 0.01), mock.patch("common.CONFIRM_TIMEOUT_SECONDS", 0.2), \
+                mock.patch("common.get_logger"):
+            with mock.patch("common.open_things_url", return_value=True):
+                self.assertFalse(apply_project_change(change, "t", self.path))  # Things ignored it.
+            with mock.patch("common.open_things_url", side_effect=things_applies) as opened:
+                self.assertTrue(apply_project_change(change, "t", self.path))
+        self.assertTrue(opened.call_args[0][0].startswith("things:///update-project?"))
+
     def test_task_fields(self) -> None:
         with open_things_db(self.path) as conn:
             task = read_task(conn, "today1")
@@ -537,7 +607,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(task.context, "Project")
             self.assertEqual(read_task(conn, "today2").context, "Work")
             self.assertIsNone(read_task(conn, "missing"))
-            self.assertEqual(missing_priority_tags(conn), ["P3"])
+            self.assertEqual(missing_priority_tags(conn), ["P3", "P4"])
 
     def test_database_is_read_only(self) -> None:
         with open_things_db(self.path) as conn, self.assertRaises(sqlite3.OperationalError):

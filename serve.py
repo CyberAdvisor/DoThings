@@ -8,9 +8,12 @@ first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.0.3
+Version: 1.1.0
 
 Change log:
+- v1.1.0 (2026-11-08): step_sequences removes Next Up from projects also tagged
+  Sequential and starts a Next Up task as P4; the list response sends the
+  priorities; fourth Today group and P4 search.
 - v1.0.3 (2026-11-07): Synchronized module version metadata.
 - v1.0.2 (2026-11-07): Synchronized module version metadata.
 - v1.0.1 (2026-11-07): Change log trimmed to v1.0.0 and later; earlier history is in git.
@@ -37,6 +40,7 @@ from common import (
     SERVER_PORT,
     THINGS_LISTS,
     apply_change,
+    apply_project_change,
     build_show_url,
     count_completed,
     count_inbox,
@@ -53,6 +57,7 @@ from common import (
     read_edit_options,
     read_last_completed,
     read_list,
+    read_sequence_project_tags,
     read_sequential_projects,
     read_task,
     save_order,
@@ -75,6 +80,7 @@ from priority_check import (
     plan_completion,
     plan_edit,
     plan_move,
+    plan_project_tags,
     plan_refresh,
     plan_sequence,
     plan_sequence_undo,
@@ -82,6 +88,7 @@ from priority_check import (
     predict,
     prune_order,
     required_priority,
+    sequence_kind,
     sequence_place,
     today_counts,
     update_order,
@@ -96,7 +103,7 @@ REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TITLE_CHARS = 1000
 MAX_NOTES_CHARS = 20000
-# Lists whose rows show the P1-P3 tags; elsewhere the list itself shows the priority.
+# Lists whose rows show the P tags; elsewhere the list itself shows the priority.
 PRIORITY_TAG_LISTS = ("overdue",)
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
@@ -128,7 +135,7 @@ def task_to_json(
     """Convert a Task into the JSON shape the page renders, mirroring a Things row.
 
     Without `show_priority_tags` the P tags are left out: in Today's groups
-    and the P1-P3 searches the priority is already shown by the list itself.
+    and the P1-P4 searches the priority is already shown by the list itself.
     `sequence` ("task 2 of 5") marks a task a sequential project started; the
     page shows it after the project name.
     """
@@ -216,6 +223,10 @@ def apply_refresh_rules(
 def step_sequences(db_path: str, token: str, today: date) -> bool:
     """Start or undo the next task of each sequential project. Returns True if a write failed.
 
+    Sequential and Next Up projects work the same way; a Next Up project's
+    task is started as P4. A project tagged both first has Next Up removed in
+    Things (fix_sequence_tags) and is then Sequential.
+
     Each started task is recorded (sequence_pulls.json) with the date given
     and the task whose completion led to it, so only tasks Do Things started
     are ever put back to undated. While a recorded task is open with that
@@ -227,8 +238,11 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
     task is started (plan_sequence). Records that no longer apply are dropped.
     """
     with open_things_db(db_path) as conn:
+        project_tags = read_sequence_project_tags(conn)
         projects = read_sequential_projects(conn)
         last_done = read_last_completed(conn, projects)
+    if not fix_sequence_tags(project_tags, token, db_path):
+        return True
     pulls = load_pulls()
     kept = {p: pulls[p] for p in pulls if p in projects}  # Drop projects no longer sequential or open.
     for project, tasks in projects.items():
@@ -236,7 +250,8 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
         pulled = find_pulled(tasks, record.task, record.started_on) if record else None
         if pulled is None:
             kept.pop(project, None)
-            start = plan_sequence(tasks, today)
+            kind = sequence_kind(project_tags.get(project, []))
+            start = plan_sequence(tasks, today, kind) if kind else None
             if start is not None:
                 if not apply_change(start, token, db_path):
                     return save_and_fail(kept, pulls)
@@ -255,6 +270,21 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
     if kept != pulls:
         save_pulls(kept)
     return False
+
+
+def fix_sequence_tags(project_tags: Dict[str, List[str]], token: str, db_path: str) -> bool:
+    """Remove Next Up from every project also tagged Sequential. Returns False if a write failed.
+
+    `project_tags` is updated to the confirmed tags, so the project is then Sequential.
+    """
+    for project, tags in project_tags.items():
+        change = plan_project_tags(project, tags)
+        if change is None:
+            continue
+        if not apply_project_change(change, token, db_path):
+            return False
+        project_tags[project] = change.tags
+    return True
 
 
 def save_and_fail(kept: Dict[str, Pull], pulls: Dict[str, Pull]) -> bool:
@@ -318,6 +348,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "token_set": token is not None,
         "refresh_paused": RefreshPause.paused,
         "missing_tags": missing,
+        "priorities": list(PRIORITIES),
         "counts": counts,
     }
     if name == "today":
@@ -532,7 +563,7 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns the When, deadline and priority the save would end up with (after
     the edit and refresh rules), the task's row as it will look, and where it
-    will appear in the list `list` the page is showing ("P1"-"P3" in Today,
+    will appear in the list `list` the page is showing ("P1"-"P4" in Today,
     "list" in a search, None if it leaves the list). The page shows these
     instead of working out the rules itself.
     """
