@@ -20,7 +20,7 @@ Guide for contributors and AI agents working on this repository.
 | `priority_check.py` | Pure rules and the `Task`, `Change`, `ProjectChange` and `TaskEdit` models: `required_priority`, `plan_refresh`, `plan_move`, `plan_edit`, `plan_completion`, Sequential and Next Up projects (`sequence_kind`, `plan_project_tags`, `plan_sequence`, `plan_sequence_undo`, `plan_sequence_reset`), `predict` and `place_in_list` (an edit's result and where it is listed), grouping, ordering (`update_order`, `prune_order`) and counts |
 | `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, edit, edit preview, sequence reset and its preview, refresh retry, open in Things, token), refresh pause, row JSON |
 | `debug_things.py` | Read-only diagnostic entry point |
-| `index.html` | Page: sidebar with counts, Hide Completed and Settings; Things-style rows; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar; Settings and token setup |
+| `index.html` | Page: sidebar with counts, Hide Completed, Hide Empty and Settings; Things-style rows; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar; Settings and token setup |
 | `screenshots/today.png` | README screenshot of Today, taken from the running app with sample data (deviation: the only non-root file besides the release workflow) |
 | `test_priority_check.py`, `test_common.py`, `test_serve.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things) |
 | `README.md`, `CHANGELOG.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
@@ -50,7 +50,7 @@ Do not weaken any of these without explicit approval:
 - All paths are `*_PATH` constants in `common.py` built from `BASE_DIR`.
 - New sidebar searches: add the id to `APP_LISTS` and a branch in `_list_query` (`common.py`), the same membership in `place_in_list` (`priority_check.py`), an entry to `LISTS` in `index.html`, and tests in `test_common.py` and `test_priority_check.py`. The P1–P4 searches are Today plus the tag; `APP_LISTS` and `_list_query` derive them from `PRIORITIES`.
 - The page updates optimistically and sends changes one at a time through `enqueue`; the list is redrawn from Things once the queue is empty. `load()` must not draw over an editor, drag or change started while its request was running.
-- Browser-only settings (Hide Completed, appearance) live in `localStorage`; wrap access in try/catch.
+- Browser-only settings (Hide Completed, Hide Empty, appearance) live in `localStorage`; wrap access in try/catch.
 - Things' own lists (Inbox, Upcoming, Anytime, Someday, Logbook) are not queried: they are in `THINGS_LISTS` and open in Things via `/api/show-list`. Mark such entries `things: true` in `LISTS`.
 - Priorities: `PRIORITIES` and `PRIORITY_LABELS` in `priority_check.py` drive the Today groups, searches, saved order and the editor's choices (the list response sends `priorities` to the page). A new priority also needs an entry in `LISTS` in `index.html` and the README.
 - Never send a write while a P tag is missing in Things (`missing_priority_tags`): Things drops unknown tags silently, so the write can't be confirmed and looks like a token failure.

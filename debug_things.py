@@ -6,9 +6,10 @@ dates, completion, project order, required priority and the change the refresh r
 would make, plus each sequential (Sequential or Next Up) project's kind and task in progress.
 It never writes to Things or to any Do Things file.
 
-Version: 1.2.0
+Version: 1.3.0
 
 Change log:
+- v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Synchronized module version metadata.
 - v1.1.0 (2026-11-08): Shows each project's kind (Sequential or Next Up) and
   flags projects tagged both.

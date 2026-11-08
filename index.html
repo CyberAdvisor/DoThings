@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.2.0
+  Version: 1.3.0
 
   Change log:
+  - v1.3.0 (2026-11-08): "Hide Empty" sidebar checkbox hides Today's priority
+    groups that show no tasks (after Hide Completed); while a task is dragged
+    they reappear as drop targets.
   - v1.2.0 (2026-11-08): "Reset other tasks" in the editor of a task in a
     Sequential or Next Up project: shows what would go back to Anytime, with
     a reminder to check the project order, then applies it on Reset.
@@ -66,7 +69,7 @@
   }
   .nav-item .opens-things { color: var(--muted); }
   .nav-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
-  /* The Hide Completed checkbox looks like a task's checkbox. */
+  /* The Hide Completed and Hide Empty checkboxes look like a task's checkbox. */
   .nav-option input {
     appearance: none; -webkit-appearance: none; margin: 0; width: 16px; height: 16px; flex-shrink: 0;
     border: 1.5px solid var(--muted); border-radius: 4px; cursor: pointer; position: relative;
@@ -114,6 +117,12 @@
   section.group h2 .tag { color: var(--muted); font-weight: 500; font-size: 12px; }
   .drop-zone { min-height: 34px; padding: 2px 0; }
   .empty { color: var(--muted); font-size: 13px; padding: 8px 10px; }
+  /* Hide Empty: groups with no tasks (and the "Nothing here." line that is
+     only drawn when all are empty) are hidden, except during a drag, when
+     every group must be a drop target. */
+  .all-empty { display: none; }
+  body.hide-empty:not(.dragging-task) section.group.unfilled { display: none; }
+  body.hide-empty:not(.dragging-task) .all-empty { display: block; }
   /* Task rows */
   .task {
     display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px;
@@ -279,6 +288,7 @@ const state = {
   counts: null,   // Sidebar counts from the last list response: {inbox, today: {due, not_due}}.
   priorities: [], // Priority tags, highest first, from the last list response (the editor's choices).
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
+  hideEmpty: loadSetting("hideEmpty", false), // "Hide Empty" sidebar option (Today's groups).
   theme: loadSetting("theme", "dark"), // Appearance: "dark" (default) or "light".
   version: "",
 };
@@ -366,17 +376,12 @@ function renderSidebar() {
     }
     nav.append(item);
   }
-  const option = el("label", "nav-option");
-  const hide = el("input");
-  hide.type = "checkbox";
-  hide.checked = state.hideCompleted;
-  hide.onchange = () => {
-    state.hideCompleted = hide.checked;
-    saveSetting("hideCompleted", hide.checked);
-    load();
-  };
-  option.append(hide, el("span", "", "Hide Completed"));
-  nav.append(option);
+  // Hide Completed is applied by the server, so the list is reloaded;
+  // Hide Empty only hides groups already drawn.
+  nav.append(
+    sidebarOption("Hide Completed", "hideCompleted", load),
+    sidebarOption("Hide Empty", "hideEmpty", applyHideEmpty),
+  );
   const footer = el("div", "nav-footer");
   const settings = el("div", "nav-item" + (state.view === "settings" ? " selected" : ""));
   settings.innerHTML = ICONS.settings; // Static icon markup only.
@@ -390,6 +395,29 @@ function renderSidebar() {
   version.title = "Open the Do Things guide";
   footer.append(settings, version);
   nav.append(footer);
+}
+
+/**
+ * Build a sidebar checkbox for the boolean setting `key`: a change is saved in
+ * this browser and then `apply` is called.
+ */
+function sidebarOption(label, key, apply) {
+  const option = el("label", "nav-option");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = state[key];
+  box.onchange = () => {
+    state[key] = box.checked;
+    saveSetting(key, box.checked);
+    apply();
+  };
+  option.append(box, el("span", "", label));
+  return option;
+}
+
+/** Show or hide Today's empty groups to match the Hide Empty option (see the .unfilled CSS). */
+function applyHideEmpty() {
+  document.body.classList.toggle("hide-empty", state.hideEmpty);
 }
 
 /**
@@ -459,9 +487,13 @@ function taskRow(task, priority) {
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", task.id);
       row.classList.add("dragging");
+      // Show groups hidden by Hide Empty as drop targets. Deferred because
+      // changing the layout inside dragstart makes Chrome cancel the drag.
+      setTimeout(() => { if (state.drag) document.body.classList.add("dragging-task"); });
     });
     row.addEventListener("dragend", () => {
       row.classList.remove("dragging");
+      document.body.classList.remove("dragging-task");
       state.drag = null;
       removeMarker();
     });
@@ -550,6 +582,8 @@ function renderList(data) {
   content.append(status);
   if (data.groups) {
     for (const group of data.groups) content.append(renderGroup(group));
+    // Only seen while Hide Empty hides every group.
+    if (data.groups.every((g) => !g.tasks.length)) content.append(el("div", "empty all-empty", "Nothing here."));
   } else {
     const zone = el("div", "drop-zone");
     if (!data.tasks.length) zone.append(el("div", "empty", "Nothing here."));
@@ -558,9 +592,12 @@ function renderList(data) {
   }
 }
 
-/** Build a Today priority section that accepts dropped tasks. */
+/**
+ * Build a Today priority section that accepts dropped tasks. A section with
+ * no tasks is marked `unfilled`, so Hide Empty can hide it.
+ */
 function renderGroup(group) {
-  const section = el("section", "group");
+  const section = el("section", "group" + (group.tasks.length ? "" : " unfilled"));
   const title = el("h2", "", group.label);
   title.append(el("span", "tag", group.priority));
   const zone = el("div", "drop-zone");
@@ -595,6 +632,16 @@ function dropIndex(zone, clientY) {
     return clientY < box.top + box.height / 2;
   });
   return index === -1 ? rows.length : index;
+}
+
+/**
+ * Mark a zone as having a task before one is put in it: remove its "No tasks"
+ * line and let Hide Empty show its group again.
+ */
+function fillZone(zone) {
+  zone.querySelectorAll(".empty").forEach((e) => e.remove());
+  zone.closest("section.group").classList.remove("unfilled");
+  document.querySelectorAll(".all-empty").forEach((e) => e.remove());
 }
 
 /** Remove the drop position marker. */
@@ -655,7 +702,7 @@ function dropTask(zone, clientY) {
   removeMarker();
   // Show the task in its new place straight away.
   const row = document.querySelector(`.task[data-id="${CSS.escape(id)}"]`);
-  zone.querySelectorAll(".empty").forEach((e) => e.remove());
+  fillZone(zone);
   zone.insertBefore(row, rows[index] || null);
   enqueue(row, "the move", () => from === to
     ? api("/api/order", { priority: to, order: ids })
@@ -1139,7 +1186,7 @@ function placeRow(card, preview) {
   const zone = group && document.querySelector(`.drop-zone[data-priority="${group}"]`);
   if (zone && card.parentNode !== zone) {
     card.remove();
-    zone.querySelectorAll(".empty").forEach((e) => e.remove());
+    fillZone(zone);
     zone.insertBefore(row, zone.querySelector(".task.done"));
   } else {
     card.replaceWith(row);
@@ -1358,6 +1405,7 @@ async function load() {
 /** Load the version, show the first list, and start the refresh timers. */
 async function start() {
   applyTheme(state.theme);
+  applyHideEmpty();
   try {
     state.version = (await api("/api/status")).version;
   } catch (error) {

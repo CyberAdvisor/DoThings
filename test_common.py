@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.2.0
+Version: 1.3.0
 
 Change log:
+- v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Test for the next_up flag.
 - v1.1.0 (2026-11-08): Tests for the P4 search, Next Up project queries, the
   update-project URL and project change confirmation.

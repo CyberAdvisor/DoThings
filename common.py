@@ -3,9 +3,10 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the local task-order file and the auth token.
 
-Version: 1.2.0
+Version: 1.3.0
 
 Change log:
+- v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Every task read carries next_up (project tagged Next Up
   and not Sequential).
 - v1.1.0 (2026-11-08): Reads Next Up projects with the Sequential ones, and

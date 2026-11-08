@@ -7,9 +7,10 @@ edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides what kind of sequence a project tagged Sequential or
 Next Up is, and which task such a project starts next.
 
-Version: 1.2.0
+Version: 1.3.0
 
 Change log:
+- v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Untagged Today task of a Next Up project is P4
   (Task.next_up); plan_sequence no longer tags (rule 3 does);
   plan_sequence_reset for Reset other tasks, sharing _back_to_anytime with the

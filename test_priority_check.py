@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.2.0
+Version: 1.3.0
 
 Change log:
+- v1.3.0 (2026-11-08): Synchronized module version metadata.
 - v1.2.0 (2026-11-08): Tests for P4 by default in Next Up projects and for
   plan_sequence_reset.
 - v1.1.0 (2026-11-08): Tests for P4, Next Up projects and the project tag
