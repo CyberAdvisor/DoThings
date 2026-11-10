@@ -9,9 +9,10 @@ display. It also decides which priority a sequential project's tasks get
 starts next, and validates the user's settings (priority names, options,
 sequential-project tags and calendar events).
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Saved orders for Today's views: ALL_ORDER_KEY and
   PROJECT_ORDER_PREFIX keys, is_order_key; prune_order keeps them (dropping

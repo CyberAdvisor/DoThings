@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Project view groups have no gray note.
 - v2.0.0 (2026-11-10): Tests for Today's views, the tag filter and /api/drop
   (moves between priorities and projects, refusals, filtered reorders, the

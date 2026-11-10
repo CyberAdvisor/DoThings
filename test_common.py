@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Tests for read_sidebar (sidebar order, no TMArea.index)
   and the view orders in task_order.json; TMArea has an index column.

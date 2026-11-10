@@ -10,9 +10,10 @@ auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Today's view (priority, project or all) and tag filter in
   /api/list (view, tag; the response carries view, tag, tags and each group's

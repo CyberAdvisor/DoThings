@@ -6,9 +6,10 @@ dragging in that view, lists the tags for the tag bar and filters by the
 chosen tag, says where a task appears in a view (the edit preview), and works
 out a group's full order after a drop seen through the tag filter.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Project view headers show only the project or area
   name (no gray "Project", "Area" or area name after it).
 - v2.0.0 (2026-11-10): New. Priority, Project and All views of Today and the

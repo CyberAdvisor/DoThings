@@ -1,8 +1,9 @@
 """Tests for Today's views and the tag bar in view_check.py.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Project view headers have no gray note.
 - v2.0.0 (2026-11-10): New. Priority, Project and All views, the tag bar
   and drops seen through the tag filter.

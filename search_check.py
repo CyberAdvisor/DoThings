@@ -8,9 +8,10 @@ the `Search` model, the default searches, validation of searches.json and of
 the builder's input, matching, result order, the summary line under a
 search's title, and new search ids.
 
-Version: 2.0.1
+Version: 2.0.2
 
 Change log:
+- v2.0.2 (2026-11-10): Synchronized module version metadata.
 - v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Synchronized module version metadata.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
