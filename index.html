@@ -3,9 +3,14 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.7.1
+  Version: 1.8.0
 
   Change log:
+  - v1.8.0 (2026-11-10): Today's calendar events above the priority groups
+    (all-day first, then by time, in their calendar's color; ended ones
+    dimmed, the current one's time in red; click opens it in Calendar), an
+    amber notice when calendar access is off, and Settings › Calendar events
+    (turn on, which asks macOS for access, and choose calendars).
   - v1.7.1 (2026-11-10): Synchronized module version metadata.
   - v1.7.0 (2026-11-10): Settings › Sequential projects: a list of project
     tags, each with a priority and whether it exists in Things; tags are added,
@@ -139,6 +144,24 @@
   .settings .remove:hover { color: var(--text); }
   .settings .add-tag { margin-top: 6px; }
   .banner a { color: inherit; font-weight: 600; }
+  .settings .cal-row { display: grid; grid-template-columns: 22px 14px minmax(0, 220px) auto; gap: 8px; align-items: center; margin-bottom: 6px; }
+  .settings .cal-label { margin-top: 14px; }
+  .settings .swatch { width: 12px; height: 12px; border-radius: 3px; }
+  .settings .account { color: var(--muted); font-size: 12px; }
+  /* Today's calendar events (display only), above the priority groups. */
+  .events { margin: 0 0 26px; padding: 4px 0 8px; border-bottom: 1px solid var(--line); }
+  .event {
+    display: flex; align-items: center; gap: 10px; padding: 4px 10px; font-size: 13px;
+    border-radius: 6px; cursor: pointer; width: 100%; text-align: left;
+    background: none; border: none; color: var(--text); font-family: inherit;
+  }
+  .event:hover { background: var(--hover); }
+  .event .bar { width: 3px; height: 16px; border-radius: 2px; flex-shrink: 0; }
+  .event .when { color: var(--muted); font-size: 12px; width: 132px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .event .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event .cal { color: var(--muted); font-size: 12px; }
+  .event.past { opacity: .45; }
+  .event.now .when { color: var(--red); font-weight: 600; }
   /* Main area */
   main { flex: 1; overflow-y: auto; padding: 36px 48px 80px; }
   .content { max-width: 720px; margin: 0 auto; }
@@ -626,6 +649,7 @@ function renderBanners(content, data) {
   if (data.name === "today" && data.missing_sequence_tags && data.missing_sequence_tags.length) {
     content.append(sequenceTagsBanner(data.missing_sequence_tags));
   }
+  if (data.calendar && data.calendar.access !== "allowed") content.append(calendarBanner(data.calendar.access));
   if (data.refresh_paused) {
     const banner = stepsBanner(
       "Automatic updates are paused: Things didn't apply a change from Do Things. Check:", WRITE_FAILED_STEPS);
@@ -663,6 +687,58 @@ function sequenceTagsBanner(missing) {
   return banner;
 }
 
+// Why Today shows no events although they're turned on, by calendar access state.
+const CALENDAR_BLOCKED = {
+  not_asked: "Do Things hasn't been allowed to read your calendars yet. Turn events off and on again in ",
+  unavailable: "Do Things couldn't read your calendars (details in errors.log). Try again later, or turn events off in ",
+};
+const CALENDAR_DENIED =
+  "Do Things can't read your calendars. In System Settings › Privacy & Security › Calendars, turn on Terminal " +
+  "(and Shortcuts, if you start Do Things from the shortcut), then come back here. Or turn events off in ";
+
+/** Build Today's amber notice for calendar events that can't be read; it links to Settings › Calendar events. */
+function calendarBanner(access) {
+  const banner = el("div", "banner");
+  banner.setAttribute("role", "status");
+  const text = el("p", "", CALENDAR_BLOCKED[access] || CALENDAR_DENIED);
+  const link = el("a", "", "Settings › Calendar events");
+  link.href = "#";
+  link.onclick = (event) => {
+    event.preventDefault();
+    showSettings("calendar-settings");
+  };
+  text.append(link, ".");
+  banner.append(text);
+  return banner;
+}
+
+/**
+ * Build Today's calendar events, in the order the server sends (all-day
+ * first, then by time). Display only: clicking one opens it in Calendar.
+ * Event data is set as text; the color comes from the server as #rrggbb.
+ */
+function renderEvents(events) {
+  const section = el("section", "events");
+  section.setAttribute("aria-label", "Calendar events");
+  for (const event of events) {
+    const row = el("button", "event" + (event.state ? ` ${event.state}` : ""));
+    row.type = "button";
+    row.title = "Open in Calendar";
+    const bar = el("span", "bar");
+    bar.style.background = event.color;
+    row.append(bar, el("span", "when", event.label), el("span", "what", event.title), el("span", "cal", event.calendar));
+    row.onclick = async () => {
+      try {
+        await api("/api/calendar/open", { id: event.id });
+      } catch (error) {
+        setStatus(error.message);
+      }
+    };
+    section.append(row);
+  }
+  return section;
+}
+
 /** Resume automatic updates after the checks above, and reload (which tries them once). */
 async function retryRefresh() {
   try {
@@ -682,6 +758,7 @@ function renderList(data) {
   const status = el("div", "status", state.status);
   status.id = "status";
   content.append(status);
+  if (data.calendar && data.calendar.events.length) content.append(renderEvents(data.calendar.events));
   if (data.groups) {
     for (const group of data.groups) content.append(renderGroup(group));
     // Only seen while Hide Empty hides every group.
@@ -1485,6 +1562,8 @@ async function showSettings(scrollTo) {
     page.append(prioritySettings(data, store));
     page.append(el("h2", "", "Sequential projects"));
     page.append(sequenceSettings(data, store));
+    page.append(el("h2", "", "Calendar events"));
+    page.append(calendarSettings(data, store));
   } else {
     page.append(el("div", "banner", failure));
   }
@@ -1686,6 +1765,92 @@ function sequenceSettings(data, store) {
   };
   draw();
   section.append(rowsBox, add, message);
+  return section;
+}
+
+// What Settings says about calendar access, by access state: [text, found or missing].
+const CALENDAR_ACCESS_TEXT = {
+  allowed: ["✓ Calendar access allowed.", "found"],
+  unavailable: ["Couldn't read Calendar (details in errors.log).", "missing"],
+};
+
+/** Describe calendar access in Settings; `on` is whether events are turned on. */
+function calendarAccessText(access, on) {
+  if (CALENDAR_ACCESS_TEXT[access]) return CALENDAR_ACCESS_TEXT[access];
+  if (access === "not_asked") {
+    return on ? ["Not allowed yet: turn this off and on again to see macOS's prompt.", "missing"]
+      : ["macOS asks for calendar access when you turn this on.", "found"];
+  }
+  return ["Not allowed: in System Settings › Privacy & Security › Calendars, turn on Terminal " +
+    "(and Shortcuts, if you start Do Things from the shortcut).", "missing"];
+}
+
+/**
+ * Build the Calendar events settings: turn today's events on (which asks
+ * macOS for access, the only place that can show its prompt) and choose the
+ * calendars. Unchecked calendars are saved as hidden_calendars, so new
+ * calendars show until unchecked. Each change is saved at once.
+ */
+function calendarSettings(data, store) {
+  const section = el("div");
+  section.id = "calendar-settings";
+  section.append(el("p", "", "Show today's events from macOS Calendar at the top of Today, as Things does. Do Things only reads them."));
+  const body = el("div");
+  const message = el("div", "error");
+  let calendar = data.calendar;
+  const save = async (changes) => {
+    try {
+      await store.save(changes);
+      message.textContent = "";
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  };
+
+  const draw = () => {
+    body.replaceChildren();
+    const on = store.current.calendar_events;
+    const toggle = el("label", "option");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = on;
+    box.onchange = async () => {
+      box.disabled = true;
+      if (box.checked) {
+        access.textContent = "Waiting for macOS… answer its prompt if one appears.";
+        try {
+          calendar = await api("/api/calendar/access", {});
+        } catch (error) {
+          message.textContent = error.message;
+        }
+      }
+      await save({ calendar_events: box.checked });
+      draw();
+    };
+    toggle.append(box, el("span", "", "Show calendar events in Today"));
+    const [words, kind] = calendarAccessText(calendar.access, on);
+    const access = el("p", "help " + kind, words);
+    body.append(toggle, access);
+    if (!on || calendar.access !== "allowed") return;
+    body.append(el("p", "cal-label", "Calendars to show:"));
+    for (const cal of calendar.calendars) {
+      const row = el("label", "cal-row");
+      const check = el("input");
+      check.type = "checkbox";
+      check.checked = !store.current.hidden_calendars.includes(cal.id);
+      check.onchange = () => {
+        const hidden = store.current.hidden_calendars.filter((id) => id !== cal.id);
+        save({ hidden_calendars: check.checked ? hidden : [...hidden, cal.id] });
+      };
+      const swatch = el("span", "swatch");
+      swatch.style.background = cal.color;
+      row.append(check, swatch, el("span", "", cal.title), el("span", "account", cal.source));
+      body.append(row);
+    }
+    body.append(el("p", "help flush", "New calendars are shown until you uncheck them."));
+  };
+  draw();
+  section.append(body, message);
   return section;
 }
 

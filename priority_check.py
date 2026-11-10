@@ -6,12 +6,15 @@ manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides which priority a sequential project's tasks get
 (from the project tags listed in Settings) and which task such a project
-starts next, and validates the user's settings (priority names, options and
-sequential-project tags).
+starts next, and validates the user's settings (priority names, options,
+sequential-project tags and calendar events).
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Settings for calendar events in Today
+  (calendar_events, off by default, and hidden_calendars, the calendars the
+  user unchecked).
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential-project tags come from Settings
   (Settings.sequence_tags, each with a priority); sequence_priority replaces
@@ -52,6 +55,7 @@ PRIORITIES = ("P1", "P2", "P3", "P4", "P5")
 DEFAULT_PRIORITY_NAMES = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up", "P5": ""}
 MAX_PRIORITY_NAME_CHARS = 40
 MAX_SEQUENCE_TAG_CHARS = 60
+MAX_CALENDAR_ID_CHARS = 200
 
 
 @dataclass
@@ -148,12 +152,18 @@ class Settings:
     priority) pairs, in the user's order; a project with one of these tags in
     Things works one task at a time, and its untagged Today tasks get that
     priority (sequence_priority). Empty until the user adds some.
+    `calendar_events`: show today's calendar events in Today (off by default,
+    so nobody gets macOS's calendar prompt without asking for it).
+    `hidden_calendars`: ids of the calendars the user unchecked; storing the
+    unchecked ones means a new calendar shows until it is unchecked.
     """
 
     names: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_PRIORITY_NAMES))
     auto_p1: bool = True
     default_priority: str = "P2"
     sequence_tags: Tuple[Tuple[str, str], ...] = ()
+    calendar_events: bool = False
+    hidden_calendars: Tuple[str, ...] = ()
 
     @property
     def sequence_tag_names(self) -> List[str]:
@@ -167,6 +177,8 @@ class Settings:
             "auto_p1": self.auto_p1,
             "default_priority": self.default_priority,
             "sequence_tags": [{"tag": tag, "priority": priority} for tag, priority in self.sequence_tags],
+            "calendar_events": self.calendar_events,
+            "hidden_calendars": list(self.hidden_calendars),
         }
 
 
@@ -197,7 +209,18 @@ def parse_settings(raw: object) -> Settings:
     if default_priority not in PRIORITIES:
         raise ValueError("The priority for new Today tasks must be one of P1 to P5.")
     sequence_tags = _parse_sequence_tags(raw.get("sequence_tags", []))
-    return Settings(names=names, auto_p1=auto_p1, default_priority=default_priority, sequence_tags=sequence_tags)
+    calendar_events = raw.get("calendar_events", DEFAULT_SETTINGS.calendar_events)
+    if not isinstance(calendar_events, bool):
+        raise ValueError("calendar_events must be true or false.")
+    hidden = raw.get("hidden_calendars", [])
+    if not isinstance(hidden, list) or not all(
+        isinstance(i, str) and 0 < len(i) <= MAX_CALENDAR_ID_CHARS for i in hidden
+    ):
+        raise ValueError("Hidden calendars must be a list of calendar ids.")
+    return Settings(
+        names=names, auto_p1=auto_p1, default_priority=default_priority, sequence_tags=sequence_tags,
+        calendar_events=calendar_events, hidden_calendars=tuple(dict.fromkeys(hidden)),  # Repeats dropped.
+    )
 
 
 def _parse_sequence_tags(given: object) -> Tuple[Tuple[str, str], ...]:

@@ -3,9 +3,13 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Calendar reads mocked in every test (never asking);
+  tests for Today's events (off by default, order, hidden and canceled
+  calendars, labels and states, access states), the calendars in Settings,
+  the access request, opening an event, and logging a lasting problem once.
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential projects come from the tags listed in the
   saved settings (use_sequence_tags): tests for a tag's priority, two listed
@@ -33,13 +37,15 @@ import io
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
 import serve
+from calendar_check import Calendar, CalendarRead, Event
 from priority_check import Settings, Task
 from common import (
     Pull,
@@ -94,6 +100,9 @@ class MockThingsTestCase(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.apply_change = mock.patch.object(serve, "apply_change", return_value=True).start()
+        # Calendar: never run osascript; macOS hasn't been asked unless a test says otherwise.
+        self.read_calendar = mock.patch.object(serve, "read_calendar", return_value=CalendarRead("not_asked")).start()
+        mock.patch.object(serve.CalendarLog, "last_problem", "").start()
         self.addCleanup(mock.patch.stopall)
 
     def tearDown(self) -> None:
@@ -742,6 +751,106 @@ class SettingsApiTests(MockThingsTestCase):
         self.assertEqual((sent.tags, sent.set_deadline, sent.clear_deadline), (["P1"], None, False))
 
 
+class CalendarTests(MockThingsTestCase):
+    """Today's calendar events (read only), Settings › Calendar events and opening an event."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.zone = os.environ.get("TZ")
+        os.environ["TZ"] = "America/Denver"
+        time.tzset()
+        self.addCleanup(self.restore_zone)
+        at = lambda hour, minute=0: datetime(TODAY.year, TODAY.month, TODAY.day, hour, minute).timestamp()
+        self.events = [
+            Event("E-lunch", "Lunch", False, at(12), at(13), "c1", "Home", "#0088ff"),
+            Event("E-holiday", "Holiday", True, at(0), at(0) + 86400, "c2", "US Holidays", "#cb30e0"),
+            Event("E-gone", "Canceled", False, at(9), at(10), "c1", "Home", "#0088ff", status=3),
+            Event("E-gym", "Gym", False, at(8), at(8, 30), "c1", "Home", "#0088ff"),
+        ]
+        self.read_calendar.return_value = CalendarRead("allowed", [], self.events)
+        mock.patch.object(serve.time, "time", return_value=at(12, 15)).start()
+
+    def restore_zone(self) -> None:
+        """Put the test runner's time zone back."""
+        if self.zone is None:
+            del os.environ["TZ"]
+        else:
+            os.environ["TZ"] = self.zone
+        time.tzset()
+
+    def turn_on(self, hidden: tuple = ()) -> None:
+        """Save settings with calendar events on and `hidden` calendars unchecked."""
+        save_settings(Settings(calendar_events=True, hidden_calendars=hidden), self.settings_path)
+
+    def test_off_by_default_and_calendar_not_read(self) -> None:
+        self.assertIsNone(serve.list_response("today")["calendar"])
+        self.read_calendar.assert_not_called()
+
+    def test_events_in_todays_order_with_labels_and_states(self) -> None:
+        self.turn_on()
+        calendar = serve.list_response("today")["calendar"]
+        self.assertEqual(calendar["access"], "allowed")
+        rows = [(e["title"], e["label"], e["state"], e["calendar"]) for e in calendar["events"]]
+        self.assertEqual(rows, [("Holiday", "All day", None, "US Holidays"),
+                                ("Gym", "8:00 – 8:30 AM", "past", "Home"),
+                                ("Lunch", "12:00 – 1:00 PM", "now", "Home")])  # Canceled left out.
+        self.assertEqual(calendar["events"][0]["color"], "#cb30e0")
+        self.read_calendar.assert_called_once_with(False)  # A refresh never asks for access.
+
+    def test_unchecked_calendar_hidden(self) -> None:
+        self.turn_on(hidden=("c2",))
+        titles = [e["title"] for e in serve.list_response("today")["calendar"]["events"]]
+        self.assertEqual(titles, ["Gym", "Lunch"])
+
+    def test_no_access_and_searches(self) -> None:
+        self.turn_on()
+        self.read_calendar.return_value = CalendarRead("denied")
+        self.assertEqual(serve.list_response("today")["calendar"], {"access": "denied", "events": []})
+        self.assertNotIn("calendar", serve.list_response("p2"))  # Today only.
+
+    def test_lasting_problem_logged_once(self) -> None:
+        self.turn_on()
+        self.read_calendar.return_value = CalendarRead("unavailable", problem="osascript failed: boom")
+        with mock.patch.object(serve, "get_logger") as logger:
+            serve.list_response("today")
+            serve.list_response("today")
+            self.assertEqual(logger.return_value.error.call_count, 1)
+            self.read_calendar.return_value = CalendarRead("allowed", [], [])
+            serve.list_response("today")  # Works again: the next problem is logged again.
+            self.read_calendar.return_value = CalendarRead("unavailable", problem="osascript failed: boom")
+            serve.list_response("today")
+            self.assertEqual(logger.return_value.error.call_count, 2)
+
+    def test_settings_lists_calendars_without_asking(self) -> None:
+        self.read_calendar.return_value = CalendarRead("allowed", [Calendar("c1", "Home", "iCloud", "#0088ff")])
+        response = serve.settings_response()
+        self.assertEqual(response["calendar"], {"access": "allowed", "calendars": [
+            {"id": "c1", "title": "Home", "source": "iCloud", "color": "#0088ff"}]})
+        self.read_calendar.assert_called_once_with(False)
+        self.assertEqual((response["settings"]["calendar_events"], response["settings"]["hidden_calendars"]), (False, []))
+
+    def test_access_request_and_saving(self) -> None:
+        self.read_calendar.return_value = CalendarRead("allowed")
+        self.assertEqual(serve.request_calendar_access({})["access"], "allowed")
+        self.read_calendar.assert_called_once_with(True)
+        self.assertIs(serve.POST_ROUTES["/api/calendar/access"], serve.request_calendar_access)
+        settings = dict(serve.settings_response()["settings"], calendar_events=True, hidden_calendars=["c2"])
+        saved = serve.update_settings({"settings": settings})["settings"]
+        self.assertEqual((saved["calendar_events"], saved["hidden_calendars"]), (True, ["c2"]))
+
+    def test_open_event_in_calendar(self) -> None:
+        with mock.patch.object(serve, "open_url", return_value=True) as opened:
+            self.assertEqual(serve.open_event({"id": "E-lunch"}), {"ok": True})
+            opened.assert_called_once_with("ical://ekevent/E-lunch?method=show&options=more", background=False)
+            for body, status in (({"id": "E-other"}, 404), ({"id": "bad id"}, 400), ({}, 400)):
+                with self.subTest(body=body):
+                    with self.assertRaises(serve.ApiError) as raised:
+                        serve.open_event(body)
+                    self.assertEqual(raised.exception.status, status)
+            self.assertEqual(opened.call_count, 1)
+        self.assertIs(serve.POST_ROUTES["/api/calendar/open"], serve.open_event)
+
+
 class EditTests(MockThingsTestCase):
     """Loading a task for the inline editor and saving edits."""
 
@@ -942,12 +1051,12 @@ class ListRoutingTests(MockThingsTestCase):
                 serve.list_response(name)
 
     def test_show_list_opens_things_in_foreground(self) -> None:
-        with mock.patch.object(serve, "open_things_url", return_value=True) as opener:
+        with mock.patch.object(serve, "open_url", return_value=True) as opener:
             self.assertEqual(serve.show_list({"name": "logbook"}), {"ok": True})
         opener.assert_called_once_with("things:///show?id=logbook", background=False)
 
     def test_show_list_rejects_other_names(self) -> None:
-        with mock.patch.object(serve, "open_things_url") as opener:
+        with mock.patch.object(serve, "open_url") as opener:
             for name in ("today", "p1", "nope", None):
                 with self.assertRaises(serve.ApiError):
                     serve.show_list({"name": name})

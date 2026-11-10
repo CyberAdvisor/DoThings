@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Tests for the calendar settings (calendar_events,
+  hidden_calendars).
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Tests for sequential-project tags in the settings
   (parse_settings, sequence_priority, rule 3 with a tag's priority, two listed
@@ -268,6 +270,13 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(settings.to_json()["sequence_tags"][0], {"tag": "Sequential", "priority": "P2"})
         self.assertEqual(parse_settings(settings.to_json()), settings)  # Round trip.
 
+    def test_calendar_settings(self) -> None:
+        self.assertEqual((DEFAULT_SETTINGS.calendar_events, DEFAULT_SETTINGS.hidden_calendars), (False, ()))
+        settings = parse_settings({"calendar_events": True, "hidden_calendars": ["c2", "c1", "c2"]})
+        self.assertEqual((settings.calendar_events, settings.hidden_calendars), (True, ("c2", "c1")))
+        self.assertEqual(settings.to_json()["hidden_calendars"], ["c2", "c1"])
+        self.assertEqual(parse_settings(settings.to_json()), settings)  # Round trip.
+
     def test_invalid_rejected(self) -> None:
         for raw in ([], {"names": []}, {"names": {"P6": "x"}}, {"names": {"P1": 3}}, {"names": {"P1": "a\nb"}},
                     {"names": {"P1": "x" * 41}}, {"auto_p1": "yes"}, {"default_priority": "P6"},
@@ -277,7 +286,9 @@ class SettingsTests(unittest.TestCase):
                     {"sequence_tags": [{"tag": "x" * 61, "priority": "P2"}]},
                     {"sequence_tags": [{"tag": "P2", "priority": "P2"}]},
                     {"sequence_tags": [{"tag": "A", "priority": "P6"}]},
-                    {"sequence_tags": [{"tag": "A", "priority": "P2"}, {"tag": "A ", "priority": "P3"}]}):
+                    {"sequence_tags": [{"tag": "A", "priority": "P2"}, {"tag": "A ", "priority": "P3"}]},
+                    {"calendar_events": "yes"}, {"hidden_calendars": "c1"}, {"hidden_calendars": [""]},
+                    {"hidden_calendars": [3]}, {"hidden_calendars": ["x" * 201]}):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 parse_settings(raw)
 

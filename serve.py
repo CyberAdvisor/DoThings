@@ -4,13 +4,19 @@ Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves, reorders, edits, completes
 and reopens tasks, moves tasks to Things' Trash, resets a sequential project to one task in Today, opens
 tasks and Things' own lists in Things, reads and saves the user's settings,
-and stores the Things auth token on first run.
+shows today's calendar events (read only) and opens them in Calendar, and
+stores the Things auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Today's list response carries today's calendar events
+  (when turned on in Settings) and the calendar access state; the settings
+  response carries the calendars; POST /api/calendar/access asks macOS for
+  calendar access (the only call that can show its prompt); POST
+  /api/calendar/open opens one of today's events in Calendar.
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential projects are the ones with a tag listed in
   Settings (step_sequences, sequence_labels and Reset other tasks take the
@@ -43,10 +49,11 @@ import argparse
 import errno
 import json
 import sqlite3
+import time
 import urllib.parse
 import webbrowser
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from datetime import time as dt_time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -60,6 +67,7 @@ from common import (
     SERVER_PORT,
     THINGS_LISTS,
     apply_change,
+    build_calendar_event_url,
     build_show_url,
     count_completed,
     count_inbox,
@@ -73,10 +81,11 @@ from common import (
     missing_tags,
     move_to_trash,
     open_things_db,
-    open_things_url,
+    open_url,
     read_checklist_progress,
     read_edit_options,
     read_last_completed,
+    read_calendar,
     read_list,
     read_sequential_projects,
     read_task,
@@ -85,7 +94,16 @@ from common import (
     save_pulls,
     save_settings,
     save_token,
+    start_of_day,
     today_local,
+)
+from calendar_check import (
+    CalendarRead,
+    Event,
+    event_state,
+    event_time_label,
+    is_valid_event_id,
+    visible_events,
 )
 from priority_check import (
     PRIORITIES,
@@ -331,6 +349,61 @@ def sequence_labels(conn: sqlite3.Connection, settings: Settings) -> Dict[str, s
     return labels
 
 
+class CalendarLog:
+    """The last calendar read problem logged, so a lasting one is logged once, not every refresh."""
+
+    last_problem = ""
+
+
+def note_calendar_problem(read: CalendarRead) -> None:
+    """Log a calendar read problem when it first appears (cleared once a read works)."""
+    if read.problem and read.problem != CalendarLog.last_problem:
+        get_logger().error("Could not read calendar events: %s", read.problem)
+    CalendarLog.last_problem = read.problem
+
+
+def calendar_read(request_access: bool = False) -> CalendarRead:
+    """Read Calendar (asking for access first if `request_access`) and log a new problem."""
+    read = read_calendar(request_access)
+    note_calendar_problem(read)
+    return read
+
+
+def event_to_json(event: Event, day_start: float, day_end: float, now: float) -> Dict[str, Any]:
+    """Return one calendar event as the page shows it above Today's groups."""
+    return {
+        "id": event.id,
+        "title": event.title,
+        "calendar": event.calendar,
+        "color": event.color,
+        "label": event_time_label(event, day_start, day_end),
+        "state": event_state(event, now),  # "past", "now" or None.
+    }
+
+
+def calendar_json(settings: Settings, today: date) -> Optional[Dict[str, Any]]:
+    """Return Today's calendar section: access state and today's events, or None while turned off.
+
+    Turned off, Calendar isn't read at all. A plain read never asks for
+    access, so a refresh can't show macOS's prompt.
+    """
+    if not settings.calendar_events:
+        return None
+    read = calendar_read()
+    day_start, day_end = start_of_day(today), start_of_day(today + timedelta(days=1))
+    now = time.time()
+    events = visible_events(read.events, settings.hidden_calendars)
+    return {"access": read.access, "events": [event_to_json(e, day_start, day_end, now) for e in events]}
+
+
+def calendars_json(read: CalendarRead) -> Dict[str, Any]:
+    """Return the access state and the calendars, for Settings › Calendar events."""
+    return {
+        "access": read.access,
+        "calendars": [{"id": c.id, "title": c.title, "source": c.source, "color": c.color} for c in read.calendars],
+    }
+
+
 def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:
     """Read Today as Do Things shows it: tasks of the same project in the project's manual order."""
     return in_project_order(read_list(conn, "today", today))
@@ -377,6 +450,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "counts": counts,
     }
     if name == "today":
+        response["calendar"] = calendar_json(settings, today)
         groups = group_today(tasks, kept, today, settings)
         response["groups"] = [
             {
@@ -730,7 +804,7 @@ def open_task(body: Dict[str, Any]) -> Dict[str, Any]:
     task_id = body.get("id")
     if not is_valid_task_id(task_id):
         raise ApiError(400, "Invalid task id.")
-    return {"ok": open_things_url(build_show_url(task_id), background=False)}
+    return {"ok": open_url(build_show_url(task_id), background=False)}
 
 
 def show_list(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -738,7 +812,30 @@ def show_list(body: Dict[str, Any]) -> Dict[str, Any]:
     name = body.get("name")
     if name not in THINGS_LISTS:
         raise ApiError(400, "Unknown Things list.")
-    return {"ok": open_things_url(build_show_url(name), background=False)}
+    return {"ok": open_url(build_show_url(name), background=False)}
+
+
+def request_calendar_access(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Ask macOS for calendar access (shows its prompt the first time), then return the calendars.
+
+    Called only when the user turns calendar events on in Settings. The
+    server waits for the answer (up to CALENDAR_REQUEST_TIMEOUT_SECONDS).
+    """
+    return calendars_json(calendar_read(request_access=True))
+
+
+def open_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Open one of today's calendar events in Calendar.
+
+    Only an event in today's read is opened, so nothing but what Today shows
+    reaches the URL.
+    """
+    event_id = body.get("id")
+    if not is_valid_event_id(event_id):
+        raise ApiError(400, "Invalid event id.")
+    if not any(e.id == event_id for e in calendar_read().events):
+        raise ApiError(404, "That event isn't in today's calendar.")
+    return {"ok": open_url(build_calendar_event_url(event_id), background=False)}
 
 
 def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -752,9 +849,10 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def settings_response() -> Dict[str, Any]:
-    """Return the saved settings, the priorities, and which P tags and sequential-project tags are missing in Things.
+    """Return the saved settings, the priorities, which P tags and sequential-project tags are missing, and the calendars.
 
-    Settings shows each priority and each sequential-project tag as found or missing in Things.
+    Settings shows each priority and each sequential-project tag as found or
+    missing in Things, and the calendars to choose from with the access state.
     """
     settings = load_settings()
     with open_things_db(require_db_path()) as conn:
@@ -765,6 +863,8 @@ def settings_response() -> Dict[str, Any]:
         "priorities": list(PRIORITIES),
         "missing_tags": missing,
         "missing_sequence_tags": missing_sequence,
+        # Read without asking, so opening Settings never shows macOS's prompt.
+        "calendar": calendars_json(calendar_read()),
     }
 
 
@@ -800,6 +900,8 @@ POST_ROUTES = {
     "/api/open": open_task,
     "/api/show-list": show_list,
     "/api/settings": update_settings,
+    "/api/calendar/access": request_calendar_access,
+    "/api/calendar/open": open_event,
     "/api/token": set_token,
 }
 

@@ -3,9 +3,12 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Tests for the calendar scripts (run_jxa, the read
+  script never asking for access, read_calendar) and the Calendar event URL;
+  open_things_url is now open_url.
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Tests for read_sequential_projects with the listed tags,
   task reads carrying their project's tags, and missing_tags; the project tag
@@ -43,6 +46,11 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from common import (
+    CALENDAR_READ_SCRIPT,
+    CALENDAR_REQUEST_SCRIPT,
+    build_calendar_event_url,
+    read_calendar,
+    run_jxa,
     LOG_MAX_BYTES,
     Pull,
     START_ANYTIME,
@@ -67,7 +75,7 @@ from common import (
     missing_tags,
     move_to_trash,
     open_things_db,
-    open_things_url,
+    open_url,
     pack_things_date,
     read_checklist_progress,
     read_edit_options,
@@ -163,7 +171,7 @@ class OpenFailureLoggingTests(unittest.TestCase):
             with self.subTest(failure=type(failure).__name__):
                 with mock.patch("common.subprocess.run", side_effect=failure), \
                         self.assertLogs("dothings", level="ERROR") as logs:
-                    self.assertFalse(open_things_url(self.URL, background=True))
+                    self.assertFalse(open_url(self.URL, background=True))
                 logged = "\n".join(logs.output)
                 self.assertNotIn("secret-token-123", logged)
                 self.assertIn("things:///update", logged)
@@ -263,6 +271,57 @@ class TrashScriptTests(unittest.TestCase):
                 self.assertIn(logged, "\n".join(logs.output))
 
 
+class CalendarScriptTests(unittest.TestCase):
+    """Running the calendar scripts (osascript mocked) and failing safe."""
+
+    def test_read_script_never_asks_for_access(self) -> None:
+        # Only the request script may show macOS's prompt; refreshes use the read script.
+        for request in ("requestFullAccessToEventsWithCompletion", "requestAccessToEntityTypeCompletion"):
+            self.assertNotIn(request, CALENDAR_READ_SCRIPT)
+            self.assertIn(request, CALENDAR_REQUEST_SCRIPT)
+        for script in (CALENDAR_READ_SCRIPT, CALENDAR_REQUEST_SCRIPT):
+            self.assertNotIn("saveEvent", script)  # Read only.
+            self.assertNotIn("removeEvent", script)
+
+    def test_run_jxa_passes_script_on_stdin(self) -> None:
+        done = subprocess.CompletedProcess([], 0, stdout='{"status": 3}\n', stderr="")
+        with mock.patch("common.subprocess.run", return_value=done) as ran:
+            self.assertEqual(run_jxa("script", 5), ({"status": 3}, ""))
+        self.assertEqual(ran.call_args[0][0], ["osascript", "-l", "JavaScript", "-"])
+        self.assertEqual((ran.call_args[1]["input"], ran.call_args[1]["timeout"]), ("script", 5))
+
+    def test_run_jxa_failures(self) -> None:
+        cases = (
+            (FileNotFoundError(), "need macOS"),
+            (subprocess.TimeoutExpired("osascript", 5), "No answer within 5 seconds"),
+            (subprocess.CompletedProcess([], 1, stdout="", stderr="execution error: -1743\n"),
+             "osascript failed: execution error: -1743"),
+            (subprocess.CompletedProcess([], 0, stdout="not json", stderr=""), "Unexpected output"),
+            (subprocess.CompletedProcess([], 0, stdout="[1]", stderr=""), "not a JSON object"),
+        )
+        for outcome, message in cases:
+            with self.subTest(message=message):
+                kwargs = {"side_effect": outcome} if isinstance(outcome, Exception) else {"return_value": outcome}
+                with mock.patch("common.subprocess.run", **kwargs):
+                    result, problem = run_jxa("script", 5)
+                self.assertIsNone(result)
+                self.assertIn(message, problem)
+
+    def test_read_calendar(self) -> None:
+        raw = {"status": 3, "calendars": [{"id": "c1", "title": "Home", "source": "iCloud", "color": "#0088ff"}],
+               "events": [{"id": "E1", "title": "Dentist", "start": 1, "end": 2, "calendar_id": "c1"}]}
+        with mock.patch("common.run_jxa", return_value=(raw, "")) as ran:
+            read = read_calendar()
+        self.assertEqual(ran.call_args[0][0], CALENDAR_READ_SCRIPT)
+        self.assertEqual((read.access, [e.title for e in read.events]), ("allowed", ["Dentist"]))
+        with mock.patch("common.run_jxa", return_value=({"status": 0}, "")) as ran:
+            self.assertEqual(read_calendar(request_access=True).access, "not_asked")
+        self.assertEqual(ran.call_args[0][0], CALENDAR_REQUEST_SCRIPT)
+        with mock.patch("common.run_jxa", return_value=(None, "osascript not found")):
+            read = read_calendar()
+        self.assertEqual((read.access, read.problem, read.events), ("unavailable", "osascript not found", []))
+
+
 class UrlTests(unittest.TestCase):
     """Things URL building."""
 
@@ -314,6 +373,9 @@ class UrlTests(unittest.TestCase):
     def test_comma_in_tag_rejected(self) -> None:
         with self.assertRaises(ValueError):
             build_update_url(Change("A1", ["a,b", "P2"]), "t")
+
+    def test_calendar_event_url(self) -> None:
+        self.assertEqual(build_calendar_event_url("AB12:CD@3"), "ical://ekevent/AB12:CD@3?method=show&options=more")
 
     def test_show_url(self) -> None:
         self.assertEqual(build_show_url("A1"), "things:///show?id=A1")

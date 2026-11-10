@@ -37,6 +37,7 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 - **Sequential projects.** In **Settings › Sequential projects**, list the project tags you use in Things, each with a priority (for example `Sequential` → P2 for work in order, and `Next Up` → P4 for lower-priority projects you want to be reminded of, such as books to read, shows to watch or chores to do). Tag a Things project with one of them and Do Things brings its tasks into Today one at a time, in project order. When you check one off, the next one starts. Each such task shows its place, for example "Vacation · task 2 of 5". If you uncheck a task, the task it started goes back. The project's tasks in Today without a P tag, including ones you dated yourself, get the priority set beside the tag. A project with two listed tags uses the higher priority; Do Things never changes a project's tags. The list starts empty.
 - **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline, each with its priority as a colored pill. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
 - **Reset a sequential project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
+- **Calendar events in Today.** Turn on **Settings › Calendar events** and today's events from macOS Calendar appear above the priority groups, as in Things: all-day events first, then by time, each in its calendar's color. Ended events are dimmed, the current one's time is red, and clicking one opens it in Calendar. Choose which calendars to show. Do Things only reads your calendars.
 - **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Move to Trash** in the same card moves an open task to Things' Trash after you confirm it (put it back from the Trash in Things if needed). **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
 - **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a list mixes priorities (Overdue), each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
@@ -82,7 +83,9 @@ The commands in this guide assume that location. If you put it elsewhere, change
    - If you missed or declined the prompt, open **System Settings › Privacy & Security › Files & Folders**. Under **Terminal**, turn on **Data shared by Things and affiliated apps**.
    - Without this, Do Things reports "Things database not found".
 4. **Shortcuts needs the same permission.** Terminal's access doesn't cover the Do Things shortcut (section 7). Expect the same macOS prompt, for Shortcuts, the first time the shortcut runs.
-5. **Allow Do Things to move tasks to the Trash.** Things' URL commands can't delete, so **Move to Trash** asks Things through AppleScript. The first time you use it, macOS asks whether Terminal (or Shortcuts, if you started Do Things from the shortcut) may control Things. Click **Allow**.
+5. **Optional: allow Do Things to read your calendars.** Only needed for calendar events in Today. When you turn on **Settings › Calendar events**, macOS asks whether Terminal (or Shortcuts) may access your calendars. Click **Allow**.
+   - If you missed or declined the prompt, open **System Settings › Privacy & Security › Calendars** and turn on **Terminal** (and **Shortcuts**).
+6. **Allow Do Things to move tasks to the Trash.** Things' URL commands can't delete, so **Move to Trash** asks Things through AppleScript. The first time you use it, macOS asks whether Terminal (or Shortcuts, if you started Do Things from the shortcut) may control Things. Click **Allow**.
    - If you missed or declined the prompt, open **System Settings › Privacy & Security › Automation**. Under **Terminal** (and **Shortcuts**), turn on **Things3**.
    - Without this, Do Things says Things didn't apply the move to the Trash, and the task stays.
 
@@ -112,6 +115,11 @@ The commands in this guide assume that location. If you put it elsewhere, change
 - Next to each tag, Settings shows whether it exists in Things. A tag that doesn't exist only means no project uses it yet; Today shows an amber notice naming it, with a link back to Settings.
 - Changing a tag's priority applies to tasks that get their priority from now on; a task already started keeps its tag. Removing a tag stops its projects being worked one at a time, and Do Things no longer undoes their tasks; add it back and they continue where they were.
 
+**Calendar events** in Settings shows today's events from macOS Calendar at the top of Today:
+- Turn on **Show calendar events in Today**. The first time, macOS asks whether Terminal (or Shortcuts) may access your calendars; click **Allow**. Settings then shows "✓ Calendar access allowed."
+- Uncheck any calendar you don't want in Today. New calendars are shown until you uncheck them.
+- If access is off, Settings and Today say how to turn it on (System Settings › Privacy & Security › Calendars).
+
 Settings are saved as you change them, in `settings.json` in the Do Things folder.
 
 If Things doesn't apply an automatic update, Do Things pauses automatic updates and shows a red bar. The bar lists what to check, and has a **Retry** button and a button to re-enter the token.
@@ -130,12 +138,12 @@ It changes nothing in Things or in Do Things. It shows:
 - which sequential-project tags listed in Settings are missing in Things;
 - each sequential project's tag, priority and task in progress.
 
-`debug_calendar.py` checks, also without changing anything, whether Do Things can read today's calendar events (for a possible calendar section in Today, as in Things):
+`debug_calendar.py` checks, also without changing anything, that Do Things can read today's calendar events:
 ```
 cd ~/Documents/Projects/DoThings
 /Library/Developer/CommandLineTools/usr/bin/python3 debug_calendar.py --hide-titles
 ```
-The first time, macOS may ask whether Terminal may access your calendars. It shows whether access is granted, the calendars it sees, today's events and how long reading them took. Add `--applescript` to also time reading through the Calendar app; leave out `--hide-titles` to see event titles.
+If macOS hasn't asked yet, it asks whether Terminal may access your calendars. It shows whether access is granted, the calendars it sees, today's events as Today shows them and how long reading them took. Leave out `--hide-titles` to see event titles.
 
 ## 6. Project location and development workflow (clone to change Do Things)
 If you want Do Things to work differently, work from a clone instead of a download.
@@ -202,17 +210,19 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `priority_check.py` | The priority, move and sequential-project rules, settings validation, grouping and ordering (pure logic) |
 | `serve.py` | Entry point: local server and JSON API |
 | `debug_things.py` | Read-only diagnostic |
-| `debug_calendar.py` | Read-only check that today's calendar events can be read (EventKit, optional AppleScript comparison) |
+| `calendar_check.py` | Calendar event rules: checking what Calendar returned, which events show, their order, time labels and ended/now states (pure logic) |
+| `debug_calendar.py` | Read-only check that today's calendar events can be read |
 | `index.html` | The page: sidebar, task lists, drag-and-drop, editor, settings and token setup |
 | `screenshots/today.png` | The Today screenshot shown in this guide (sample data) |
 | `test_priority_check.py` | Tests for the rules |
 | `test_common.py` | Tests for token handling, dates, time zone, URLs, saved files and database queries |
 | `test_serve.py` | Tests for the server against a mock Things database |
-| `test_debug_calendar.py` | Tests for the calendar diagnostic's report (osascript mocked) |
+| `test_calendar_check.py` | Tests for the calendar event rules |
+| `test_debug_calendar.py` | Tests for the calendar diagnostic's report (Calendar mocked) |
 | `errors.log`, `run.log` | Runtime logs (untracked). `errors.log` is capped at 1 MB, with the previous one kept as `errors.log.1` |
 | `task_order.json` | Saved order within each priority; tasks that leave Today are dropped from it (untracked) |
 | `sequence_pulls.json` | The task Do Things started in each sequential project, so it can be undone (untracked) |
-| `settings.json` | Your settings: priority names, Auto assign P1, the priority for new Today tasks and the sequential-project tags (untracked) |
+| `settings.json` | Your settings: priority names, Auto assign P1, the priority for new Today tasks, the sequential-project tags and calendar events (untracked) |
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
 
 ## Safety notes
@@ -221,6 +231,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - If an automatic update isn't confirmed, automatic updates pause until you click **Retry**, save a new token or restart Do Things. The failure is logged once. Changes you make yourself are still sent, each with its own message if it fails.
 - Tags are written as a full list, so your other tags are kept. A tag containing a comma can't be written safely, so such a task is logged and skipped.
 - In a sequential project, Do Things only ever undoes a task it started itself, and not if you've changed that task's date since. **Reset other tasks** changes other tasks of the project only when you click **Reset**, after showing which ones.
+- Calendar events are read only: Do Things never adds, changes or removes an event. Calendar is read only while events are turned on, and only turning them on in Settings can make macOS ask for access.
 - Do Things never changes projects, only tasks. A project with two of the tags listed in Settings keeps both; the higher priority is used.
 - The server listens only on your Mac (`127.0.0.1`). It accepts only requests addressed to itself, and only accepts changes carrying a header that other websites can't add.
 - The auth token is never written to logs.

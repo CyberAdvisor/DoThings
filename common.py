@@ -1,12 +1,18 @@
 """Shared logic for Do Things.
 
 Holds file paths, version loading, logging, read-only access to the Things
-database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file,
-the user's settings file and the auth token.
+database, Things URL commands, the AppleScript that moves a to-do to the Trash,
+the read-only calendar script (today's events from macOS Calendar), the local
+task-order file, the user's settings file and the auth token.
 
-Version: 1.7.1
+Version: 1.8.0
 
 Change log:
+- v1.8.0 (2026-11-10): Calendar reading: the EventKit script (moved from
+  debug_calendar.py and split into reading and an access request that checks
+  the access status instead of waiting for macOS's reply), run_jxa,
+  run_calendar_script and read_calendar. open_things_url is now open_url (it
+  also opens Calendar's event links).
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Every task read carries its project's tags
   (Task.project_tags); read_sequential_projects takes the tags listed in
@@ -53,6 +59,7 @@ from datetime import date, datetime
 from datetime import time as dt_time  # `time` is the standard-library module used for timeouts.
 from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
+from calendar_check import ACCESS_UNAVAILABLE, CalendarRead, parse_calendar_output
 from priority_check import (
     DEFAULT_SETTINGS,
     PRIORITIES,
@@ -527,15 +534,25 @@ def build_update_url(change: Change, token: str) -> str:
     return _things_url("update", params)
 
 
+def build_calendar_event_url(event_id: str) -> str:
+    """Build the ical:// URL that shows one event in Calendar.
+
+    `event_id` must already pass calendar_check.is_valid_event_id: its
+    characters (letters, digits, ":", ".", "_", "@", "-") are all allowed in a
+    URL path, so it goes in as Calendar knows it, without encoding.
+    """
+    return f"ical://ekevent/{event_id}?method=show&options=more"
+
+
 def build_show_url(target_id: str) -> str:
     """Build the things:///show URL that opens a task, or one of THINGS_LISTS, in Things."""
     return "things:///show?" + urllib.parse.urlencode({"id": target_id})
 
 
-def open_things_url(url: str, background: bool) -> bool:
-    """Hand a things:/// URL to macOS. Returns False (and logs) on failure.
+def open_url(url: str, background: bool) -> bool:
+    """Hand a URL (things:/// or Calendar's ical://) to macOS. Returns False (and logs) on failure.
 
-    `background` keeps Things from coming to the front (open -g).
+    `background` keeps the app from coming to the front (open -g).
     """
     command = ["open", "-g", url] if background else ["open", url]
     try:
@@ -544,7 +561,7 @@ def open_things_url(url: str, background: bool) -> bool:
     except (OSError, subprocess.SubprocessError) as error:
         # Log the URL without its query, which contains the auth token.
         get_logger().error(
-            "Could not open Things URL (%s): %s", url.split("?")[0], describe_open_failure(error)
+            "Could not open URL (%s): %s", url.split("?")[0], describe_open_failure(error)
         )
         return False
 
@@ -639,7 +656,7 @@ def _open_update_url(build_url: Callable[[], str], what: str) -> bool:
     except ValueError as error:
         get_logger().error("Skipped %s: %s", what, error)
         return False
-    return open_things_url(url, background=True)
+    return open_url(url, background=True)
 
 
 def _send_and_confirm(
@@ -664,6 +681,172 @@ def _send_and_confirm(
             logger.warning("Could not re-read %s: %s", what, error)
     logger.error("Things did not confirm the change to %s (see the checks shown on the page)", what)
     return False
+
+
+# --- Calendar (read only) --------------------------------------------------
+
+# How long one calendar read may take, and how long an access request may wait
+# for the user to answer macOS's prompt (Do Things' server waits meanwhile).
+CALENDAR_READ_TIMEOUT_SECONDS = 10
+CALENDAR_REQUEST_TIMEOUT_SECONDS = 75
+
+# JavaScript for Automation shared by both calendar scripts: helpers and
+# readCalendar(), which returns the access status and, with full access, the
+# calendars and today's events (midnight to midnight, Mac time zone; EventKit
+# expands repeating events). It only reads: no EventKit save or remove call.
+_CALENDAR_JS = r"""
+ObjC.import('Foundation');
+ObjC.import('AppKit');
+ObjC.import('EventKit');
+
+const ENTITY_EVENT = 0;  // EKEntityTypeEvent
+const FULL_ACCESS = 3;   // EKAuthorizationStatusFullAccess (authorized before macOS 14)
+
+// Turn an NSString (or nil) into a JS string.
+function text(value) {
+  return value === undefined || value === null || value.isNil() ? '' : ObjC.unwrap(value);
+}
+
+// A calendar's color as "#rrggbb" in sRGB, or '' if it has none.
+function hexColor(color) {
+  if (color === undefined || color.isNil()) return '';
+  const rgb = color.colorUsingColorSpace($.NSColorSpace.sRGBColorSpace);
+  if (rgb.isNil()) return '';
+  const part = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+  return '#' + part(rgb.redComponent) + part(rgb.greenComponent) + part(rgb.blueComponent);
+}
+
+function accessStatus() {
+  return Number($.EKEventStore.authorizationStatusForEntityType(ENTITY_EVENT));
+}
+
+function readCalendar() {
+  const out = { status: accessStatus() };
+  if (out.status !== FULL_ACCESS) return out;
+  const store = $.EKEventStore.alloc.init;
+  const started = Date.now();
+  const calendars = store.calendarsForEntityType(ENTITY_EVENT);
+  out.calendars = [];
+  for (let i = 0; i < calendars.count; i++) {
+    const c = calendars.objectAtIndex(i);
+    out.calendars.push({
+      id: text(c.calendarIdentifier),
+      title: text(c.title),
+      source: c.source.isNil() ? '' : text(c.source.title),
+      color: hexColor(c.color),
+    });
+  }
+  const calendar = $.NSCalendar.currentCalendar;
+  const start = calendar.startOfDayForDate($.NSDate.date);
+  const DAY_UNIT = 16;  // NSCalendarUnitDay (1 << 4), written out in case the enum isn't bridged.
+  const end = calendar.dateByAddingUnitValueToDateOptions(DAY_UNIT, 1, start, 0);
+  const events = store.eventsMatchingPredicate(store.predicateForEventsWithStartDateEndDateCalendars(start, end, $()));
+  out.events = [];
+  for (let i = 0; i < events.count; i++) {
+    const e = events.objectAtIndex(i);
+    const cal = e.calendar;
+    out.events.push({
+      id: text(e.eventIdentifier),
+      title: text(e.title),
+      all_day: !!(e.allDay !== undefined ? e.allDay : e.isAllDay),  // Property name or getter.
+      start: Number(e.startDate.timeIntervalSince1970),
+      end: Number(e.endDate.timeIntervalSince1970),
+      calendar_id: cal.isNil() ? '' : text(cal.calendarIdentifier),
+      calendar: cal.isNil() ? '' : text(cal.title),
+      status: Number(e.status),
+      repeating: !!e.hasRecurrenceRules,
+    });
+  }
+  out.read_ms = Date.now() - started;
+  return out;
+}
+"""
+
+# Reads only; never asks for access (so a refresh can never show a prompt).
+CALENDAR_READ_SCRIPT = _CALENDAR_JS + r"""
+function run() {
+  return JSON.stringify(readCalendar());
+}
+"""
+
+# Asks for access if macOS hasn't asked yet, then reads. The request's
+# completion block doesn't reliably arrive in osascript (seen on macOS 27.2),
+# so it waits for the access status to change instead, up to 60 seconds.
+CALENDAR_REQUEST_SCRIPT = _CALENDAR_JS + r"""
+function requestAccess() {
+  const answer = { answered: false };
+  const store = $.EKEventStore.alloc.init;
+  const done = () => { answer.answered = true; };
+  try {
+    if (typeof store.requestFullAccessToEventsWithCompletion === 'function') {
+      answer.method = 'requestFullAccessToEventsWithCompletion';
+      store.requestFullAccessToEventsWithCompletion(done);
+    } else {
+      answer.method = 'requestAccessToEntityTypeCompletion';
+      store.requestAccessToEntityTypeCompletion(ENTITY_EVENT, done);
+    }
+  } catch (e) {
+    answer.error = 'request failed: ' + e;
+    return answer;
+  }
+  const until = Date.now() + 60000;
+  while (!answer.answered && accessStatus() === 0 && Date.now() < until) {
+    $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(0.25));
+  }
+  answer.answered = answer.answered || accessStatus() !== 0;
+  return answer;
+}
+
+function run() {
+  const out = { status_before: accessStatus() };
+  if (out.status_before === 0) out.request = requestAccess();
+  return JSON.stringify(Object.assign(out, readCalendar()));
+}
+"""
+
+
+def run_jxa(script: str, timeout: int) -> Tuple[Optional[dict], str]:
+    """Run a JavaScript for Automation script; return (its JSON result or None, a problem).
+
+    The script goes in on standard input, so it is never parsed as
+    command-line options. The problem is '' when the script ran and returned
+    a JSON object.
+    """
+    try:
+        result = subprocess.run(
+            ["osascript", "-l", "JavaScript", "-"],
+            input=script, capture_output=True, text=True, timeout=timeout, check=False,
+        )
+    except FileNotFoundError:
+        return None, "osascript not found: calendar events need macOS."
+    except subprocess.TimeoutExpired:
+        return None, f"No answer within {timeout} seconds (a permission prompt left open?)."
+    if result.returncode != 0:
+        return None, f"osascript failed: {result.stderr.strip() or 'no message'}"
+    try:
+        data = json.loads(result.stdout)
+    except ValueError:
+        return None, f"Unexpected output: {result.stdout.strip()[:300]!r}"
+    return (data, "") if isinstance(data, dict) else (None, "Unexpected output: not a JSON object.")
+
+
+def run_calendar_script(request_access: bool) -> Tuple[Optional[dict], str]:
+    """Run the calendar script (asking for access first if `request_access`); return its raw result and a problem."""
+    if request_access:
+        return run_jxa(CALENDAR_REQUEST_SCRIPT, CALENDAR_REQUEST_TIMEOUT_SECONDS)
+    return run_jxa(CALENDAR_READ_SCRIPT, CALENDAR_READ_TIMEOUT_SECONDS)
+
+
+def read_calendar(request_access: bool = False) -> CalendarRead:
+    """Read today's events from macOS Calendar; any failure is "unavailable" with the problem, never an error.
+
+    Only `request_access` can make macOS show its permission prompt; plain
+    reads (every refresh) never do.
+    """
+    raw, problem = run_calendar_script(request_access)
+    if raw is None:
+        return CalendarRead(ACCESS_UNAVAILABLE, problem=problem)
+    return parse_calendar_output(raw)
 
 
 # --- Local task order -----------------------------------------------------

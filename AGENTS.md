@@ -5,6 +5,7 @@ Guide for contributors and AI agents working on this repository.
 ## Project shape
 - A local web app that adds a prioritized Today view in front of Things 3.
 - `serve.py` is a Python standard-library HTTP server bound to `127.0.0.1:8765`. It serves the single-file page `index.html` and a JSON API.
+- Today can also show today's calendar events (Settings, off by default), read through EventKit from JavaScript for Automation (`osascript -l JavaScript`, script on stdin; `read_calendar` in `common.py`). Calendar is never written.
 - Reads come from the Things SQLite database, opened read-only. Writes go through `things:///update` URLs handed to macOS `open -g`, authorized by the user's Things auth token. The one exception is **Move to Trash** (the URL scheme has no delete): `move_to_trash` runs AppleScript through `osascript`, which needs macOS's Automation permission instead of the token.
 - All logic lives in Python. `index.html` only renders lists and sends actions. Where the page needs a rule's result before saving (the inline editor's dates, priority and the row after Save), it asks `POST /api/edit/preview`; it never re-implements a rule.
 - The refresh rules run on every list request (page load, window focus, every 60 seconds), not on a schedule. Sequential projects (an open project with a tag listed in Settings' `sequence_tags`) are stepped first (`step_sequences`), then each Today task gets `plan_refresh`.
@@ -16,14 +17,15 @@ Guide for contributors and AI agents working on this repository.
 ## Files
 | File | Purpose |
 |---|---|
-| `common.py` | Paths (`*_PATH`), `PROJECT_VERSION`, size-capped logger, settings file, Things date and reminder-time packing, read-only DB queries (lists, task with its project's tags, sequential projects by listed tag, edit options, counts, checklist progress, missing tags), URL building and sending, the trash AppleScript (`move_to_trash`), change confirmation, order and sequence-record files, auth token |
+| `common.py` | Paths (`*_PATH`), `PROJECT_VERSION`, size-capped logger, settings file, Things date and reminder-time packing, read-only DB queries (lists, task with its project's tags, sequential projects by listed tag, edit options, counts, checklist progress, missing tags), URL building and sending (`open_url`, also Calendar's `ical://` event links), the trash AppleScript (`move_to_trash`), the calendar scripts (`CALENDAR_READ_SCRIPT`, `CALENDAR_REQUEST_SCRIPT`, `run_jxa`, `read_calendar`), change confirmation, order and sequence-record files, auth token |
+| `calendar_check.py` | Pure calendar logic and the `Calendar`, `Event` and `CalendarRead` models: `parse_calendar_output` (fail-safe check of the script's JSON), `visible_events`, `order_events`, `event_time_label`, `event_state`, `is_valid_event_id` |
 | `priority_check.py` | Pure rules and the `Task`, `Change`, `Settings` and `TaskEdit` models: `required_priority`, `plan_refresh`, `plan_move`, `plan_edit`, `plan_completion`, sequential projects (`sequence_priority`, `plan_sequence`, `plan_sequence_undo`, `plan_sequence_reset`), `predict` and `place_in_list` (an edit's result and where it is listed), grouping, ordering (`update_order`, `prune_order`) and counts |
-| `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, trash, edit, edit preview, sequence reset and its preview, refresh retry, open in Things, settings, token), refresh pause, row JSON |
+| `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, trash, edit, edit preview, sequence reset and its preview, refresh retry, open in Things, settings, calendar access and open event, token), refresh pause, row and event JSON |
 | `debug_things.py` | Read-only diagnostic entry point |
-| `debug_calendar.py` | Read-only calendar diagnostic: reads today's events through EventKit from JavaScript for Automation (`osascript -l JavaScript`, script on stdin), with an optional AppleScript (Calendar app) comparison; never writes |
-| `index.html` | Page: sidebar with counts, Hide Completed, Hide Empty and Settings; Things-style rows with colored priority pills in lists that mix priorities; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar and Today's missing-sequential-tag notice; Settings (token, appearance, priorities, sequential projects) and token setup |
+| `debug_calendar.py` | Read-only calendar diagnostic: runs `CALENDAR_REQUEST_SCRIPT` and prints access, calendars and today's events as Today shows them; never writes |
+| `index.html` | Page: sidebar with counts, Hide Completed, Hide Empty and Settings; Things-style rows with colored priority pills in lists that mix priorities; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar, Today's missing-sequential-tag and calendar notices; today's calendar events above the groups; Settings (token, appearance, priorities, sequential projects, calendar events) and token setup |
 | `screenshots/today.png` | README screenshot of Today, taken from the running app with sample data (deviation: the only non-root file besides the release workflow) |
-| `test_priority_check.py`, `test_common.py`, `test_serve.py`, `test_debug_calendar.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things; `test_debug_calendar.py` mocks osascript) |
+| `test_priority_check.py`, `test_common.py`, `test_serve.py`, `test_calendar_check.py`, `test_debug_calendar.py` | Unit tests (`test_common.py` builds a mock Things database and mocks osascript; `test_serve.py` reuses it and mocks Things and Calendar) |
 | `README.md`, `CHANGELOG.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
 | `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
 
@@ -33,6 +35,7 @@ Do not weaken any of these without explicit approval:
 - **Confirm before recording.** `apply_change` re-reads the task until `Change.is_satisfied_by` passes (5 s timeout). The order file is saved only after a move is confirmed.
 - **Stop on failure.** `apply_refresh_rules` stops at the first unconfirmed write in a refresh, and `RefreshPause` then skips automatic writes until the user clicks Retry, saves a new token or restarts the server. Manual changes are always tried and report their own failure.
 - **Trash only what the user confirmed.** `POST /api/trash` acts only on the task the user confirmed in its editor, only if it is open, and is never called by the refresh rules. The task id is validated and passed to `osascript` as an argument (`argv`), never written into the script text. Things' AppleScript `delete` moves the to-do to the Trash (confirmed 2026-11-08); `move_to_trash` then waits for `trashed = 1`. Nothing else uses AppleScript.
+- **Calendar is read only, and only the user's click asks for access.** No EventKit save or remove call exists in the scripts (a test checks). `CALENDAR_READ_SCRIPT` never requests access, so a refresh or opening Settings can't show macOS's prompt; only `POST /api/calendar/access` (turning events on in Settings) runs `CALENDAR_REQUEST_SCRIPT`. Calendar isn't read at all while events are off. A failed read is "unavailable" and logged once per new problem, never an error that stops Today. `POST /api/calendar/open` opens only an event in today's read, with a validated id.
 - **Previews never write.** `POST /api/edit/preview` reads only; it needs no token.
 - **Projects are never changed.** Only tasks are written. A project with two listed sequential-project tags keeps both; `sequence_priority` uses the higher priority (since v1.7.0; before, `Next Up` was removed from projects also tagged `Sequential`).
 - **"Reset other tasks" acts only on the user's click.** `POST /api/sequence/reset/preview` reads only; `POST /api/sequence/reset` applies `plan_sequence_reset` for the task the user chose, records that task in `sequence_pulls.json` only after its own change (if any) is confirmed, and stops at the first unconfirmed change. Tasks with a deadline are never touched by it.
@@ -63,12 +66,12 @@ Do not weaken any of these without explicit approval:
 ## Verification
 Run all of these before every commit:
 ```
-PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py serve.py debug_things.py debug_calendar.py test_common.py test_priority_check.py test_serve.py test_debug_calendar.py
+PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py calendar_check.py serve.py debug_things.py debug_calendar.py test_common.py test_priority_check.py test_calendar_check.py test_serve.py test_debug_calendar.py
 python3 -m unittest discover -p 'test_*.py'
 git diff --check
 git status --short
 ```
-- Do not run anything that sends writes to the user's real Things as verification unless the user explicitly authorizes it. `debug_things.py` and `debug_calendar.py` are read-only and safe to run (`debug_calendar.py` only on a Mac; its JavaScript can be syntax-checked elsewhere with `node --check`).
+- Do not run anything that sends writes to the user's real Things as verification unless the user explicitly authorizes it. `debug_things.py` and `debug_calendar.py` are read-only and safe to run (`debug_calendar.py` only on a Mac). The calendar scripts can only run on a Mac; elsewhere, syntax-check them with `node --check` and exercise the server with a stub `osascript` first on `PATH` that answers with sample events.
 - To exercise the server without real Things, point `HOME` at a temporary folder containing a mock database (see `test_common.py` for the schema) and put a stub `open` command first on `PATH`.
 
 Code quality check before every commit:
