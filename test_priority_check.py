@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.9.0
+Version: 1.9.1
 
 Change log:
+- v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): place_in_list tests replaced by place_in_today (search
   membership is tested in test_search_check.py).
 - v1.8.0 (2026-11-10): Tests for the calendar settings (calendar_events,

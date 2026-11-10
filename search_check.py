@@ -8,9 +8,10 @@ the `Search` model, the default searches, validation of searches.json and of
 the builder's input, matching, result order, the summary line under a
 search's title, and new search ids.
 
-Version: 1.9.0
+Version: 1.9.1
 
 Change log:
+- v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): New. Saved searches replace the fixed P1-P4 and
   Overdue searches.
 """

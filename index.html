@@ -3,9 +3,11 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.9.0
+  Version: 1.9.1
 
   Change log:
+  - v1.9.1 (2026-11-10): Space between the last saved search and the Hide
+    Completed and Hide Empty checkboxes.
   - v1.9.0 (2026-11-10): Saved searches. The sidebar's Searches section
     collapses (▾/▸, remembered in this browser) and + starts a new search; a
     search page shows what it matches under its title and an Edit search
@@ -513,6 +515,7 @@ function renderSidebar() {
   // Hide Completed is applied by the server, so the list is reloaded;
   // Hide Empty only hides groups already drawn.
   nav.append(
+    el("div", "nav-gap"), // Same space as above the Searches heading.
     // Hide Completed also applies to the builder's results.
     sidebarOption("Hide Completed", "hideCompleted", () => (state.builder ? refreshBuilder() : load())),
     sidebarOption("Hide Empty", "hideEmpty", applyHideEmpty),

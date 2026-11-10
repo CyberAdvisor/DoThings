@@ -8,9 +8,10 @@ and each sequential project's tag, priority and task in progress,
 and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.9.0
+Version: 1.9.1
 
 Change log:
+- v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Synchronized module version metadata.
 - v1.8.0 (2026-11-10): Synchronized module version metadata.
 - v1.7.1 (2026-11-10): Synchronized module version metadata.

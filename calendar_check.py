@@ -7,9 +7,10 @@ the calendars the user chose, orders the events as Things does (all-day
 first, then by start time) and words their times. Nothing here writes to
 Calendar.
 
-Version: 1.9.0
+Version: 1.9.1
 
 Change log:
+- v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Synchronized module version metadata.
 - v1.8.0 (2026-11-10): New. Calendar, Event and CalendarRead models;
   parse_calendar_output, visible_events, order_events, event_time_label and
