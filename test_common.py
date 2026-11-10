@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Tests for the searches file and the list of every open
   task; the fixed P and Overdue search queries are gone.

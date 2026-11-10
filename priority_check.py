@@ -9,9 +9,10 @@ display. It also decides which priority a sequential project's tasks get
 starts next, and validates the user's settings (priority names, options,
 sequential-project tags and calendar events).
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): place_in_list is now place_in_today (Today's groups
   only); search membership moved to search_check.py.

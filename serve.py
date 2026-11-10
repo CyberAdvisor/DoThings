@@ -10,9 +10,10 @@ auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Saved searches: /api/list takes "today" or a search id
   and every list response carries the sidebar's searches; a search's response

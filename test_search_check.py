@@ -1,8 +1,9 @@
 """Tests for the saved-search logic in search_check.py.
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): New. Tests for parsing, matching, order, pills,
   the summary line and search ids.

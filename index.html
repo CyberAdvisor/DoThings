@@ -3,9 +3,12 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.9.1
+  Version: 1.9.2
 
   Change log:
+  - v1.9.2 (2026-11-10): Text drawn like Things (no extra font smoothing, so
+    it is crisper); dark appearance uses Things' colors: white text, its
+    secondary gray (#919294) and background (#232529).
   - v1.9.1 (2026-11-10): Space between the last saved search and the Hide
     Completed and Hide Empty checkboxes.
   - v1.9.0 (2026-11-10): Saved searches. The sidebar's Searches section
@@ -71,7 +74,9 @@
     --p5: #7b4fd6; --p5-bg: rgba(123, 79, 214, .12);
   }
   :root[data-theme="dark"] {
-    --bg: #1e1f22; --sidebar: #26272b; --text: #ececee; --muted: #8e8e93;
+    /* Background, text and secondary gray match Things' dark appearance (measured 2026-11-10);
+       the sidebar stays a step lighter than the list. */
+    --bg: #232529; --sidebar: #2a2b30; --text: #ffffff; --muted: #919294;
     --line: #34353a; --hover: #2e3035; --selected: #3a3d44; --accent: #5b8cff;
     --red: #ff6369; --pill: #34363b; --banner: #3a2e1c; --banner-text: #ffc879;
     --error: #3b1f21; --error-text: #ff9592;
@@ -82,6 +87,9 @@
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
+    /* Draw text like Things: without the extra smoothing macOS browsers add,
+       which makes light text on a dark background look heavier and softer. */
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
     display: flex; background: var(--bg); color: var(--text);
     font: 14px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
   }

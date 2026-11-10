@@ -6,9 +6,10 @@ the read-only calendar script (today's events from macOS Calendar), the local
 task-order file, the user's settings and saved-search files and the auth
 token.
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Saved searches in searches.json (SEARCHES_PATH,
   load_searches, save_searches). read_list reads Today or every open task

@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.9.1
+Version: 1.9.2
 
 Change log:
+- v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Tests for saved searches (listing, criteria, summary,
   pills, the builder's preview, saving, deleting and the edit preview's place
