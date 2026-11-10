@@ -9,9 +9,13 @@ display. It also decides which priority a sequential project's tasks get
 starts next, and validates the user's settings (priority names, options,
 sequential-project tags and calendar events).
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Saved orders for Today's views: ALL_ORDER_KEY and
+  PROJECT_ORDER_PREFIX keys, is_order_key; prune_order keeps them (dropping
+  empty ones) and update_order removes moved ids only within the same view.
+  place_in_today replaced by view_check.place_in_view.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): place_in_list is now place_in_today (Today's groups
@@ -60,6 +64,12 @@ DEFAULT_PRIORITY_NAMES = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "
 MAX_PRIORITY_NAME_CHARS = 40
 MAX_SEQUENCE_TAG_CHARS = 60
 MAX_CALENDAR_ID_CHARS = 200
+
+# Saved order keys (task_order.json) besides the priorities: the All view's
+# single list, and one list per Project view group ("project:<id>").
+ALL_ORDER_KEY = "all"
+PROJECT_ORDER_PREFIX = "project:"
+MAX_ORDER_ID_CHARS = 64
 
 
 @dataclass
@@ -466,15 +476,6 @@ def predict(task: Task, change: Change, today: date, settings: Settings = DEFAUL
     return after
 
 
-def place_in_today(task: Task, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[str]:
-    """Return the Today group (P1-P5) `task` appears in, or None if it isn't in Today.
-
-    Mirrors Today's list query for a task already refreshed. Searches use
-    search_check.matches instead.
-    """
-    return required_priority(task, today, settings) if in_today(task, today) else None
-
-
 def deadline_state(deadline: Optional[date], today: date) -> Optional[str]:
     """Classify a deadline as 'overdue', 'today' or 'future' (None if unset)."""
     if deadline is None:
@@ -634,25 +635,54 @@ def group_today(
     return {p: completed_last(apply_order(groups[p], order.get(p, []))) for p in PRIORITIES}
 
 
+def is_order_key(key: object) -> bool:
+    """True if `key` names a saved order: a priority, All's list, or a Project view group."""
+    if not isinstance(key, str):
+        return False
+    if key in PRIORITIES or key == ALL_ORDER_KEY:
+        return True
+    return key.startswith(PROJECT_ORDER_PREFIX) and 0 < len(key) - len(PROJECT_ORDER_PREFIX) <= MAX_ORDER_ID_CHARS
+
+
+def _order_family(key: str) -> str:
+    """Return the kind of view `key` orders: "priority", "project", or the All key itself."""
+    if key in PRIORITIES:
+        return "priority"
+    return "project" if key.startswith(PROJECT_ORDER_PREFIX) else key
+
+
 def prune_order(order: Dict[str, List[str]], keep: Iterable[str]) -> Dict[str, List[str]]:
-    """Return the saved order with only the ids in `keep` (the tasks still in Today)."""
-    kept = set(keep)
-    return {p: [i for i in order.get(p, []) if i in kept] for p in PRIORITIES}
+    """Return the saved order with only the ids in `keep` (the tasks still in Today).
 
-
-def update_order(
-    order: Dict[str, List[str]], priority: str, ids: List[str]
-) -> Dict[str, List[str]]:
-    """Return a new order with `priority` set to `ids`.
-
-    The ids are removed from every other priority, so a moved task is never
-    listed in two groups.
+    Every priority is kept, even when empty; other lists (All, Project view
+    groups) are dropped once empty, so the file doesn't collect old projects.
     """
-    if priority not in PRIORITIES:
-        raise ValueError(f"Unknown priority: {priority!r}")
+    kept = set(keep)
+    pruned = {p: [i for i in order.get(p, []) if i in kept] for p in PRIORITIES}
+    for key, ids in order.items():
+        if key not in PRIORITIES:
+            remaining = [i for i in ids if i in kept]
+            if remaining:
+                pruned[key] = remaining
+    return pruned
+
+
+def update_order(order: Dict[str, List[str]], key: str, ids: List[str]) -> Dict[str, List[str]]:
+    """Return a new order with the list `key` set to `ids`.
+
+    The ids are removed from the other lists of the same view (the other
+    priorities, or the other Project view groups), so a moved task is never
+    listed in two groups of one view; the other views' lists are untouched.
+    """
+    if not is_order_key(key):
+        raise ValueError(f"Unknown order: {key!r}")
     moved = set(ids)
-    updated = {
-        p: [i for i in order.get(p, []) if i not in moved] for p in PRIORITIES if p != priority
-    }
-    updated[priority] = list(ids)
+    family = _order_family(key)
+    updated = {p: list(order.get(p, [])) for p in PRIORITIES}
+    for other, other_ids in order.items():
+        updated[other] = list(other_ids)
+    for other in list(updated):
+        if other != key and _order_family(other) == family:
+            updated[other] = [i for i in updated[other] if i not in moved]
+    updated[key] = list(ids)
     return updated

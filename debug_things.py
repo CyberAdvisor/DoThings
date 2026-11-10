@@ -5,12 +5,15 @@ exist, whether the P1-P5 tags exist, the saved settings, and every Today task wi
 dates, completion, project order, required priority and the change the refresh rules
 would make, plus whether each sequential-project tag listed in Settings exists in Things,
 and each sequential project's tag, priority and task in progress,
-and each Today task's reminder time as stored by Things and as Do Things reads it.
+and each Today task's reminder time as stored by Things and as Do Things reads it,
+and Things' projects and areas in the sidebar order Today's Project view uses.
 It never writes to Things or to any Do Things file.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Prints Things' projects and areas in sidebar order
+  (Today's Project view group order), to compare with Things' sidebar.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Synchronized module version metadata.
@@ -48,6 +51,7 @@ from common import (
     read_list,
     read_raw_reminder_times,
     read_sequential_projects,
+    read_sidebar,
     today_local,
     unpack_things_time,
 )
@@ -130,6 +134,12 @@ def run() -> None:
         tasks = read_list(conn, "today", today)
         projects = read_sequential_projects(conn, settings.sequence_tag_names)
         reminders = read_raw_reminder_times(conn, [task.uuid for task in tasks])
+        sidebar = read_sidebar(conn)
+    print("\nSidebar order (Today's Project view; compare with Things' sidebar):")
+    for entry in sidebar:
+        # A project inside an area is indented under it, as in Things.
+        indent = "    " if entry.area else ""
+        print(f"{indent}- {entry.title!r} ({entry.kind})")
     pulls = load_pulls()
     print(f"\nSequential projects (with open to-dos): {len(projects)}")
     for project, project_tasks in projects.items():

@@ -10,9 +10,15 @@ auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Today's view (priority, project or all) and tag filter in
+  /api/list (view, tag; the response carries view, tag, tags and each group's
+  key, label, note and whether it takes moves); POST /api/drop replaces
+  /api/move and /api/order (reorder or move per view, the group's full order
+  worked out with place_among); the edit preview places the row in the view
+  and tag shown.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Saved searches: /api/list takes "today" or a search id
@@ -99,6 +105,7 @@ from common import (
     read_task,
     load_searches,
     load_settings,
+    read_sidebar,
     save_order,
     save_pulls,
     save_searches,
@@ -126,7 +133,6 @@ from priority_check import (
     current_priority,
     deadline_state,
     find_pulled,
-    group_today,
     in_project_order,
     parse_settings,
     plan_completion,
@@ -136,7 +142,7 @@ from priority_check import (
     plan_sequence,
     plan_sequence_reset,
     plan_sequence_undo,
-    place_in_today,
+    is_order_key,
     predict,
     prune_order,
     required_priority,
@@ -158,6 +164,20 @@ from search_check import (
     with_search,
     without_search,
 )
+from view_check import (
+    NO_PROJECT,
+    PROJECT_ORDER_PREFIX,
+    VIEW_PRIORITY,
+    VIEW_PROJECT,
+    VIEWS,
+    ViewGroup,
+    group_key,
+    has_tag,
+    place_among,
+    place_in_view,
+    tag_choices,
+    view_groups,
+)
 
 PAGE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/"
 # Requests must name this server in the Host header (blocks DNS-rebinding attacks).
@@ -168,6 +188,7 @@ REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TITLE_CHARS = 1000
 MAX_NOTES_CHARS = 20000
+MAX_TAG_CHARS = 200  # Longest tag the tag bar can ask for.
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
 
@@ -193,7 +214,7 @@ class ApiError(Exception):
 
 
 def task_to_json(
-    task: Task, today: date, priority_pill: bool = False, sequence: Optional[str] = None
+    task: Task, today: date, priority_pill: bool = False, sequence: Optional[str] = None, context: bool = True
 ) -> Dict[str, Any]:
     """Convert a Task into the JSON shape the page renders, mirroring a Things row.
 
@@ -202,12 +223,13 @@ def task_to_json(
     colored pill with the priority's name; elsewhere it is None, since
     Today's groups and searches of one priority already show the priority.
     `sequence` ("task 2 of 5") marks a task a sequential project started; the
-    page shows it after the project name.
+    page shows it after the project name. Without `context` the project or
+    area name is left out (Today's Project view, whose group header names it).
     """
     return {
         "id": task.uuid,
         "title": task.title,
-        "context": task.context,
+        "context": task.context if context else "",
         "sequence": sequence,
         "tags": [t for t in task.tags if t not in PRIORITIES],
         "priority": current_priority(task.tags) if priority_pill else None,
@@ -460,13 +482,21 @@ def search_rows(
     return [task_to_json(t, today, priority_pill=pills, sequence=labels.get(t.uuid)) for t in completed_last(tasks)]
 
 
-def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
+def list_response(
+    name: str, hide_completed: bool = False, view: str = VIEW_PRIORITY, tag: Optional[str] = None
+) -> Dict[str, Any]:
     """Build the JSON for Today or a saved search (`name` is "today" or a search id), applying the refresh rules first.
 
-    With `hide_completed`, tasks completed today are left out. Every response
-    also carries the sidebar counts and searches, so they stay current; a
-    search's response also carries the search and its summary line.
+    With `hide_completed`, tasks completed today are left out. Today is shown
+    in `view` (priority, project or all), with only the tasks tagged `tag` if
+    one is chosen. Every response also carries the sidebar counts and
+    searches, so they stay current; a search's response also carries the
+    search and its summary line.
     """
+    if view not in VIEWS:
+        raise ApiError(400, "Unknown view.")
+    if tag is not None and (not tag or len(tag) > MAX_TAG_CHARS):
+        raise ApiError(400, "Invalid tag.")
     searches = load_searches()
     search = None if name == "today" else find_search(searches, name)
     if name != "today" and search is None:
@@ -485,12 +515,13 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         today_tasks = read_today(conn, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
         labels = sequence_labels(conn, settings)
+        entries = read_sidebar(conn) if search is None and view == VIEW_PROJECT else []
         if search is not None:
             tasks = search_tasks(conn, search, today, today_tasks)
             _, titles = search_list_titles(conn)
     order = load_order()
     kept = prune_order(order, [t.uuid for t in today_tasks])  # Forget tasks that left Today.
-    if kept != {p: order.get(p, []) for p in PRIORITIES}:
+    if sum(map(len, kept.values())) != sum(map(len, order.values())):
         save_order(kept)
     response: Dict[str, Any] = {
         "name": name,
@@ -505,22 +536,42 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "searches": sidebar_searches(searches),
     }
     if search is None:
-        tasks = [t for t in today_tasks if not (hide_completed and t.completed)]
+        tasks = [t for t in today_tasks if not (hide_completed and t.completed) and has_tag(t, tag)]
         response["calendar"] = calendar_json(settings, today)
-        groups = group_today(tasks, kept, today, settings)
+        response["view"] = view
+        response["tag"] = tag
+        response["tags"] = tag_choices(today_tasks, tag)
         response["groups"] = [
-            {
-                "priority": p,
-                "label": settings.names[p],
-                "tasks": [task_to_json(t, today, sequence=labels.get(t.uuid)) for t in groups[p]],
-            }
-            for p in PRIORITIES
+            group_json(group, view, today, labels)
+            for group in view_groups(view, tasks, kept, today, settings, entries)
         ]
     else:
         response["search"] = search.to_json()
         response["summary"] = describe(search, titles)
         response["tasks"] = search_rows(tasks, search, today, labels, hide_completed)
     return response
+
+
+def group_json(group: ViewGroup, view: str, today: date, labels: Dict[str, str]) -> Dict[str, Any]:
+    """Convert one group of a Today view into the JSON the page draws.
+
+    The Project and All views mix priorities, so their rows show priority
+    pills; the Project view leaves out the project name (the header has it).
+    """
+    return {
+        "key": group.key,
+        "label": group.label,
+        "note": group.note,
+        "list_id": group.list_id,
+        "takes_moves": group.takes_moves,
+        "tasks": [
+            task_to_json(
+                t, today, priority_pill=view != VIEW_PRIORITY, sequence=labels.get(t.uuid),
+                context=view != VIEW_PROJECT,
+            )
+            for t in group.tasks
+        ],
+    }
 
 
 def parse_search_body(body: Dict[str, Any], searches: Tuple[Search, ...]) -> Search:
@@ -585,15 +636,16 @@ def delete_search(body: Dict[str, Any]) -> Dict[str, Any]:
     return {"searches": sidebar_searches(searches)}
 
 
-def parse_order(body: Dict[str, Any]) -> Tuple[str, List[str]]:
-    """Validate and return the priority and id list from a move/order request."""
-    priority = body.get("priority")
-    ids = body.get("order")
-    if priority not in PRIORITIES:
-        raise ApiError(400, "Unknown priority.")
-    if not isinstance(ids, list) or not all(is_valid_task_id(i) for i in ids):
+def parse_drop(body: Dict[str, Any]) -> Tuple[str, str, str, List[str]]:
+    """Validate a drop and return (view, group key, task id, the group's order as the page shows it)."""
+    view, key, task_id, ids = body.get("view"), body.get("key"), body.get("id"), body.get("order")
+    if view not in VIEWS:
+        raise ApiError(400, "Unknown view.")
+    if not is_order_key(key):
+        raise ApiError(400, "Unknown group.")
+    if not isinstance(ids, list) or not all(is_valid_task_id(i) for i in ids) or task_id not in ids:
         raise ApiError(400, "Invalid task order.")
-    return priority, ids
+    return view, key, task_id, ids
 
 
 def load_task_for_write(task_id: object) -> Tuple[Task, str, str, List[str]]:
@@ -624,20 +676,74 @@ def load_task(task_id: object) -> Tuple[Task, str, List[str]]:
     return task, db_path, missing
 
 
-def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Move a task to another priority, then save the new order once Things confirms."""
-    priority, ids = parse_order(body)
-    task, token, db_path, missing = load_task_for_write(body.get("id"))
+def drop_task(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Save a drag in one of Today's views: a reorder within a group, or a move to another group.
+
+    A move to another priority (Priority view) follows the move rules; a move
+    to another project or area (Project view) is the editor's project change.
+    Either is confirmed in Things before the new order is saved. The group's
+    full order is worked out on the server (place_among), so tasks the page
+    doesn't show (tag filter, Hide Completed) keep their places.
+    """
+    view, key, task_id, shown = parse_drop(body)
+    db_path = require_db_path()
+    today = today_local()
+    settings = load_settings()
+    with open_things_db(db_path) as conn:
+        today_tasks = read_today(conn, today)
+        entries = read_sidebar(conn) if view == VIEW_PROJECT else []
+        missing = missing_priority_tags(conn)
+        options = read_edit_options(conn) if view == VIEW_PROJECT else None
+    task = next((t for t in today_tasks if t.uuid == task_id), None)
+    if task is None:
+        raise ApiError(404, "That task is no longer in Today.")
     if task.completed:
         raise ApiError(409, "Uncheck the task before moving it.")
-    if priority in missing:
-        # Things would silently drop the unknown tag, so the move could never be confirmed.
-        raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
-    if not apply_change(plan_move(task, priority, today_local(), load_settings()), token, db_path):
-        # Order is only recorded after Things confirms the move.
-        return {"ok": False, "write_failed": True}
-    save_order(update_order(load_order(), priority, ids))
+    if key != group_key(task, view, today, settings):
+        change = plan_drop_move(task, view, key, today, settings, missing, options)
+        token = load_token()
+        if token is None:
+            raise ApiError(409, "The Things auth token is not set.")
+        if not apply_change(change, token, db_path):
+            # Order is only recorded after Things confirms the move.
+            return {"ok": False, "write_failed": True}
+    order = load_order()
+    groups = view_groups(view, today_tasks, order, today, settings, entries)
+    group_ids = next(([t.uuid for t in g.tasks] for g in groups if g.key == key), [])
+    save_order(update_order(order, key, place_among(group_ids, shown, task_id)))
     return {"ok": True}
+
+
+def plan_drop_move(
+    task: Task,
+    view: str,
+    key: str,
+    today: date,
+    settings: Settings,
+    missing: List[str],
+    options: Optional[Dict[str, list]],
+) -> Change:
+    """Return the change for a task dropped into another group of `view` (group `key`).
+
+    Raises an ApiError for a move Things can't make: any move in All (one
+    list), a priority whose tag is missing, the No project group, or a
+    project or area not in Things.
+    """
+    if view == VIEW_PRIORITY and key in PRIORITIES:
+        if key in missing:
+            # Things would silently drop the unknown tag, so the move could never be confirmed.
+            raise ApiError(409, f"Create the {key} tag in Things first (Window › Tags), then try again.")
+        return plan_move(task, key, today, settings)
+    if view == VIEW_PROJECT and key.startswith(PROJECT_ORDER_PREFIX) and options is not None:
+        list_id = key[len(PROJECT_ORDER_PREFIX):]
+        if list_id == NO_PROJECT:
+            raise ApiError(409, "Things can't take a task out of a project or area.")
+        if list_id not in {item["id"] for item in options["areas"] + options["projects"]}:
+            raise ApiError(400, "Unknown project or area.")
+        change = plan_edit(task, TaskEdit(list_id=list_id), today, settings)
+        if change is not None:
+            return change
+    raise ApiError(400, "That task can't be moved to this group.")
 
 
 def complete_task(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -793,11 +899,16 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns the When, deadline and priority the save would end up with (after
     the edit and refresh rules), the task's row as it will look, and where it
-    will appear in the list `list` the page is showing ("P1"-"P5" in Today,
-    "list" in a search, None if it leaves the list). The page shows these
-    instead of working out the rules itself.
+    will appear in the list `list` the page is showing (in Today, the key of
+    its group in the view `view` with the tag filter `tag`; "list" in a
+    search; None if it leaves the list). The page shows these instead of
+    working out the rules itself.
     """
     name = body.get("list")
+    view = body.get("view", VIEW_PRIORITY)
+    tag = body.get("tag")
+    if view not in VIEWS or not (tag is None or (isinstance(tag, str) and tag)):
+        raise ApiError(400, "Unknown view.")
     search = None if name == "today" else find_search(load_searches(), name)
     if name != "today" and search is None:
         raise ApiError(400, "Unknown list.")
@@ -819,15 +930,17 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
         # Still the started task of its sequential project (changing its date ends that).
         with open_things_db(db_path) as conn:
             sequence = sequence_labels(conn, settings).get(task.uuid)
+    context = True
     if search is None:
-        pills, place = False, place_in_today(after, today, settings)
+        pills, place = view != VIEW_PRIORITY, place_in_view(after, view, today, settings, tag)
+        context = view != VIEW_PROJECT
     else:
         pills, place = shows_priority_pills(search), "list" if matches(after, search, today) else None
     return {
         "when": when_json(after, today),
         "deadline": after.deadline.isoformat() if after.deadline else None,
         "priority": required_priority(after, today, settings),
-        "row": task_to_json(after, today, priority_pill=pills, sequence=sequence),
+        "row": task_to_json(after, today, priority_pill=pills, sequence=sequence, context=context),
         "place": place,
     }
 
@@ -910,13 +1023,6 @@ def reset_sequence(body: Dict[str, Any]) -> Dict[str, Any]:
         if not apply_change(change, token, db_path):
             return {"ok": False, "write_failed": True}
     return {"ok": True, "returned": len(others)}
-
-
-def reorder_tasks(body: Dict[str, Any]) -> Dict[str, Any]:
-    """Save a new order within one priority (no change in Things)."""
-    priority, ids = parse_order(body)
-    save_order(update_order(load_order(), priority, ids))
-    return {"ok": True}
 
 
 def open_task(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -1008,7 +1114,7 @@ def retry_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 POST_ROUTES = {
-    "/api/move": move_task,
+    "/api/drop": drop_task,
     "/api/complete": complete_task,
     "/api/trash": trash_task,
     "/api/edit": edit_task,
@@ -1016,7 +1122,6 @@ POST_ROUTES = {
     "/api/refresh/retry": retry_refresh,
     "/api/sequence/reset": reset_sequence,
     "/api/sequence/reset/preview": preview_reset,
-    "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,
     "/api/settings": update_settings,
@@ -1056,7 +1161,9 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(query)
             name = params.get("name", [""])[0]
             hide_completed = params.get("hide_completed", [""])[0] == "1"
-            self._run(lambda: list_response(name, hide_completed))
+            view = params.get("view", [VIEW_PRIORITY])[0]
+            tag = params.get("tag", [None])[0]
+            self._run(lambda: list_response(name, hide_completed, view, tag))
         elif path == "/api/settings":
             self._run(settings_response)
         elif path == "/api/task":

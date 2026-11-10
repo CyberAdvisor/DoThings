@@ -7,9 +7,10 @@ the calendars the user chose, orders the events as Things does (all-day
 first, then by start time) and words their times. Nothing here writes to
 Calendar.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Synchronized module version metadata.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Synchronized module version metadata.

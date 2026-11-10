@@ -1,8 +1,11 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Tests for the view order keys (is_order_key,
+  update_order per view, prune_order dropping empty view lists); place tests
+  use view_check.place_in_view.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): place_in_list tests replaced by place_in_today (search
@@ -47,8 +50,8 @@ from priority_check import (
     group_today,
     in_project_order,
     in_today,
+    is_order_key,
     parse_settings,
-    place_in_today,
     plan_completion,
     plan_edit,
     plan_move,
@@ -65,6 +68,7 @@ from priority_check import (
     today_counts,
     update_order,
 )
+from view_check import VIEW_PRIORITY, place_in_view
 
 TODAY = date(2026, 11, 7)
 YESTERDAY = TODAY - timedelta(days=1)
@@ -323,8 +327,8 @@ class AutoP1OffTests(unittest.TestCase):
         change = plan_edit(task, TaskEdit(deadline=YESTERDAY), TODAY, self.OFF)
         after = predict(task, change, TODAY, self.OFF)
         self.assertEqual((after.deadline, current_priority(after.tags)), (YESTERDAY, "P2"))
-        self.assertEqual(place_in_today(after, TODAY, self.OFF), "P2")
-        self.assertEqual(place_in_today(after, TODAY), "P1")  # With it on, the same task is P1.
+        self.assertEqual(place_in_view(after, VIEW_PRIORITY, TODAY, self.OFF), "P2")
+        self.assertEqual(place_in_view(after, VIEW_PRIORITY, TODAY), "P1")  # With it on, the same task is P1.
 
 
 class DefaultPriorityTests(unittest.TestCase):
@@ -386,7 +390,7 @@ class P4Tests(unittest.TestCase):
         self.assertEqual((change.tags, change.set_deadline), (["P1"], TODAY))
 
     def test_p4_group(self) -> None:
-        self.assertEqual(place_in_today(make_task(tags=["P4"], start_date=TODAY), TODAY), "P4")
+        self.assertEqual(place_in_view(make_task(tags=["P4"], start_date=TODAY), VIEW_PRIORITY, TODAY), "P4")
 
     def test_undo_removes_p4(self) -> None:
         reopened = in_project("first", "N", (0, 0, 9), start_date=TODAY)
@@ -698,6 +702,30 @@ class OrderingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             update_order({}, "P9", [])
 
+    def test_update_order_keeps_other_views(self) -> None:
+        # A priority move leaves the All and Project view orders alone.
+        order = {"P1": ["A"], "all": ["A", "B"], "project:x": ["A"]}
+        updated = update_order(order, "P2", ["A"])
+        self.assertEqual((updated["P1"], updated["P2"]), ([], ["A"]))
+        self.assertEqual((updated["all"], updated["project:x"]), (["A", "B"], ["A"]))
+
+    def test_update_order_project_groups_are_one_view(self) -> None:
+        order = {"P2": ["A"], "project:x": ["A", "B"], "project:y": ["C"]}
+        updated = update_order(order, "project:y", ["C", "A"])
+        self.assertEqual(updated["project:x"], ["B"])
+        self.assertEqual(updated["project:y"], ["C", "A"])
+        self.assertEqual(updated["P2"], ["A"])
+
+    def test_update_order_all(self) -> None:
+        updated = update_order({"P1": ["A"]}, "all", ["B", "A"])
+        self.assertEqual((updated["all"], updated["P1"]), (["B", "A"], ["A"]))
+
+    def test_is_order_key(self) -> None:
+        for key in ("P1", "P5", "all", "project:abc", "project:none"):
+            self.assertTrue(is_order_key(key), key)
+        for key in ("P9", "", "project:", "project:" + "x" * 65, None, 3, "projects"):
+            self.assertFalse(is_order_key(key), key)
+
     def test_deadline_state(self) -> None:
         self.assertEqual(deadline_state(YESTERDAY, TODAY), "overdue")
         self.assertEqual(deadline_state(TODAY, TODAY), "today")
@@ -741,14 +769,15 @@ class PredictTests(unittest.TestCase):
         after = predict(make_task(tags=["P2"]), Change("A1", None, set_deadline=TODAY), TODAY)
         self.assertEqual((after.start_date, after.tags), (TODAY, ["P1"]))
 
-    def test_place_in_today(self) -> None:
-        self.assertEqual(place_in_today(make_task(tags=["P2"], start_date=TODAY), TODAY), "P2")
-        self.assertEqual(place_in_today(make_task(tags=["P2"], deadline=YESTERDAY), TODAY), "P1")
-        self.assertIsNone(place_in_today(make_task(tags=["P1"], start_date=TOMORROW), TODAY))
-
     def test_prune_order(self) -> None:
         order = {"P1": ["a", "gone"], "P3": ["b"]}
         self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"], "P4": [], "P5": []})
+
+    def test_prune_order_drops_empty_view_lists(self) -> None:
+        order = {"all": ["a", "gone"], "project:x": ["gone"], "project:y": ["b"]}
+        pruned = prune_order(order, ["a", "b"])
+        self.assertEqual((pruned["all"], pruned["project:y"]), (["a"], ["b"]))
+        self.assertNotIn("project:x", pruned)
 
 
 if __name__ == "__main__":

@@ -12,9 +12,10 @@ answer is a macOS setting, not a change to any calendar). Nothing is written
 to Calendar, Things or any Do Things file. --hide-titles replaces event
 titles with "(title hidden)", for sharing the output.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Synchronized module version metadata.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Synchronized module version metadata.

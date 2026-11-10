@@ -3,9 +3,17 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.9.2
+  Version: 2.0.0
 
   Change log:
+  - v2.0.0 (2026-11-10): Today's Priority / Project / All switch beside the
+    title (remembered in this browser) and the tag bar (one tag at a time; All
+    clears it; back to All on reload). Project view: a group per project or
+    area in Things' sidebar order, then No project; dragging to another group
+    moves the task to that project or area in Things. All view: one list by
+    priority until dragged. Rows show priority pills in both. Drags save
+    through one request (/api/drop), and the edit preview places the row in
+    the view and tag being shown.
   - v1.9.2 (2026-11-10): Text drawn like Things (no extra font smoothing, so
     it is crisper); dark appearance uses Things' colors: white text, its
     secondary gray (#919294) and background (#232529).
@@ -243,7 +251,7 @@
   .builder .b-message { color: var(--red); font-size: 12px; min-height: 0; margin-top: 8px; }
   .builder-count { color: var(--muted); font-size: 13px; margin: 0 0 6px 10px; }
   .task.inert { cursor: default; }
-  /* Priority groups */
+  /* Today's groups (priorities, projects and areas, or All's single list) */
   section.group { margin-bottom: 26px; }
   section.group h2 {
     font-size: 15px; margin: 0 0 4px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
@@ -381,6 +389,24 @@
   }
   button.secondary { background: transparent; color: var(--text); }
   .error { color: var(--red); }
+  /* Today's view switch (Priority / Project / All) beside the title. */
+  .view-switch { display: inline-flex; margin-left: auto; }
+  .view-switch button {
+    font-size: 12px; padding: 4px 12px; border-radius: 0; background: var(--bg); color: var(--text);
+  }
+  .view-switch button:first-child { border-radius: 6px 0 0 6px; }
+  .view-switch button:last-child { border-radius: 0 6px 6px 0; }
+  .view-switch button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* Today's tag bar: one tag at a time, as in Things. */
+  .tag-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+  .tag-bar button {
+    font-size: 12px; padding: 2px 10px; border-radius: 11px; border-color: var(--muted);
+    background: transparent; color: var(--text);
+  }
+  .tag-bar button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  /* Project view's No project group can't take tasks from other groups; said while dragging. */
+  .drop-hint { display: none; color: var(--muted); font-size: 12px; font-style: italic; padding: 4px 10px; }
+  body.dragging-task .drop-hint { display: block; }
 </style>
 </head>
 <body>
@@ -423,6 +449,8 @@ const LISTS = [
   { id: "logbook", name: "Logbook", icon: "logbook", things: true },
 ];
 const REFRESH_MS = 60000;
+// Today's views, in the switch's order (see view_check.py).
+const VIEWS = [["priority", "Priority"], ["project", "Project"], ["all", "All"]];
 
 const state = {
   list: "today",
@@ -436,7 +464,9 @@ const state = {
   priorities: [], // Priority tags, highest first, from the last list response (the editor's choices).
   priorityNames: {}, // Name of each priority from Settings (priority pills); "" shows the tag.
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
-  hideEmpty: loadSetting("hideEmpty", false), // "Hide Empty" sidebar option (Today's groups).
+  hideEmpty: loadSetting("hideEmpty", false), // "Hide Empty" sidebar option (Today's priority groups).
+  todayView: savedView(), // Today's view: "priority", "project" or "all" (remembered in this browser).
+  tag: null,      // Tag chosen in Today's tag bar, or null for All. Not remembered: a reload shows all.
   searches: [],   // The sidebar's saved searches ({id, name}), from the last list response.
   searchesCollapsed: loadSetting("searchesCollapsed", false), // Searches section closed (▸).
   builder: null,  // The open search builder (see openBuilder), or null.
@@ -454,6 +484,12 @@ function loadSetting(key, fallback) {
   } catch (error) {
     return fallback;
   }
+}
+
+/** Return Today's view saved in this browser, or "priority" if none or not a known view. */
+function savedView() {
+  const view = loadSetting("todayView", "priority");
+  return VIEWS.some(([id]) => id === view) ? view : "priority";
 }
 
 /** Save a setting in this browser; it is simply not remembered if storage is unavailable. */
@@ -638,10 +674,11 @@ function appendCounts(extra, id) {
 // --- Task lists --------------------------------------------------------------
 
 /**
- * Build one task row. Open Today rows are draggable between and within groups.
- * An `inert` row (the search builder's results) is display only.
+ * Build one task row. Open Today rows are draggable between and within
+ * groups; `group` is the key of the Today group the row is in (null in a
+ * search). An `inert` row (the search builder's results) is display only.
  */
-function taskRow(task, priority, inert = false) {
+function taskRow(task, group, inert = false) {
   const row = el("div", "task" + (task.completed ? " done" : ""));
   row.dataset.id = task.id;
   if (inert) row.classList.add("inert");
@@ -685,12 +722,12 @@ function taskRow(task, priority, inert = false) {
   }
   if (inert) return row;
   row.onclick = () => startEdit(row, task.id);
-  if (priority && !task.completed) {
+  if (group && !task.completed) {
     row.draggable = true;
     row.addEventListener("dragstart", (event) => {
       // No dragging while editing, or a row whose last change isn't confirmed yet.
       if (state.edit || row.classList.contains("saving")) { event.preventDefault(); return; }
-      state.drag = { id: task.id, from: priority };
+      state.drag = { id: task.id, from: group };
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", task.id);
       row.classList.add("dragging");
@@ -881,21 +918,26 @@ async function retryRefresh() {
   load();
 }
 
-/** Draw a list: priority groups for Today, a flat list otherwise. */
+/** Draw a list: Today in its view (groups, tag bar), a flat list for a search. */
 function renderList(data) {
   const content = document.getElementById("content");
   content.replaceChildren();
   if (data.search) renderSearchHeader(content, data);
-  else renderHeader(content, LISTS.find((l) => l.id === data.name));
+  else renderTodayHeader(content, data);
   renderBanners(content, data);
   const status = el("div", "status", state.status);
   status.id = "status";
   content.append(status);
+  if (data.groups && (data.tags.length || data.tag)) content.append(tagBar(data.tags, data.tag));
   if (data.calendar && data.calendar.events.length) content.append(renderEvents(data.calendar.events));
   if (data.groups) {
-    for (const group of data.groups) content.append(renderGroup(group));
-    // Only seen while Hide Empty hides every group.
-    if (data.groups.every((g) => !g.tasks.length)) content.append(el("div", "empty all-empty", "Nothing here."));
+    for (const group of data.groups) content.append(renderGroup(group, data.view));
+    if (data.view === "priority") {
+      // Only seen while Hide Empty hides every group.
+      if (data.groups.every((g) => !g.tasks.length)) content.append(el("div", "empty all-empty", "Nothing here."));
+    } else if (!data.groups.some((g) => g.tasks.length)) {
+      content.append(el("div", "empty", "Nothing here."));
+    }
   } else {
     const zone = el("div", "drop-zone");
     if (!data.tasks.length) zone.append(el("div", "empty", "Nothing here."));
@@ -904,30 +946,101 @@ function renderList(data) {
   }
 }
 
+/** Add Today's title with the Priority / Project / All switch beside it. */
+function renderTodayHeader(content, data) {
+  const entry = LISTS.find((l) => l.id === data.name);
+  const head = el("div", "list-head");
+  const views = el("div", "view-switch");
+  views.setAttribute("role", "group");
+  views.setAttribute("aria-label", "Show Today by");
+  for (const [id, label] of VIEWS) {
+    const button = el("button", "secondary" + (id === data.view ? " on" : ""), label);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(id === data.view));
+    button.onclick = () => {
+      if (id === state.todayView || !canRedraw()) return;
+      state.todayView = id;
+      saveSetting("todayView", id);
+      load();
+    };
+    views.append(button);
+  }
+  head.append(listHeading(entry.name, entry.icon), views);
+  content.append(head);
+}
+
+/** Build Today's tag bar: All, then one chip per tag; the chosen one is highlighted. */
+function tagBar(tags, chosen) {
+  const bar = el("div", "tag-bar");
+  bar.setAttribute("role", "group");
+  bar.setAttribute("aria-label", "Show one tag");
+  for (const tag of [null, ...tags]) {
+    const button = el("button", tag === chosen ? "on" : "", tag === null ? "All" : tag);
+    button.type = "button";
+    button.setAttribute("aria-pressed", String(tag === chosen));
+    button.onclick = () => {
+      if (tag === state.tag || !canRedraw()) return;
+      state.tag = tag;
+      load();
+    };
+    bar.append(button);
+  }
+  return bar;
+}
+
 /**
- * Build a Today priority section that accepts dropped tasks. A section with
- * no tasks is marked `unfilled`, so Hide Empty can hide it.
+ * True if Today can be redrawn for a new view or tag now; otherwise says why
+ * (an open editor, or a change still being saved).
  */
-function renderGroup(group) {
-  const section = el("section", "group" + (group.tasks.length ? "" : " unfilled"));
-  // A priority with no name (Settings) shows just its tag.
-  const title = el("h2", "", group.label || group.priority);
-  if (group.label) title.append(el("span", "tag", group.priority));
+function canRedraw() {
+  if (state.edit) { editorMessage("Save or cancel the open task first."); return false; }
+  if (state.pending || state.busy || state.drag) {
+    setStatus("Still saving your last change. Try again in a moment.");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Build one group of Today's view that accepts dropped tasks. Priority view
+ * groups always exist (drop targets) and one with no tasks is marked
+ * `unfilled`, so Hide Empty can hide it. All's single group has no header.
+ * A group that doesn't take tasks from other groups (Project view's No
+ * project) says so while a task is dragged.
+ */
+function renderGroup(group, view) {
+  const section = el("section", "group");
+  if (view === "priority" && !group.tasks.length) section.classList.add("unfilled");
+  if (view !== "all") {
+    // A priority with no name (Settings) shows just its tag.
+    const title = el("h2", "", group.label || group.key);
+    if (group.note) title.append(el("span", "tag", group.note));
+    section.append(title);
+  }
   const zone = el("div", "drop-zone");
-  zone.dataset.priority = group.priority;
-  if (!group.tasks.length) zone.append(el("div", "empty", "No tasks"));
-  for (const task of group.tasks) zone.append(taskRow(task, group.priority));
+  zone.dataset.key = group.key;
+  if (!group.tasks.length) zone.append(el("div", "empty", view === "priority" ? "No tasks" : "Nothing here."));
+  for (const task of group.tasks) zone.append(taskRow(task, group.key));
+  if (!group.takes_moves) {
+    zone.dataset.noMoves = "1";
+    zone.append(el("div", "drop-hint", "Tasks can’t be moved here: Things can’t take a task out of a project or area."));
+  }
   zone.addEventListener("dragover", (event) => {
-    if (!state.drag) return;
+    if (!state.drag || !acceptsDrop(zone)) { removeMarker(); return; }
     event.preventDefault();
     placeMarker(zone, event.clientY);
   });
   zone.addEventListener("drop", (event) => {
     event.preventDefault();
-    if (state.drag) dropTask(zone, event.clientY);
+    if (state.drag && acceptsDrop(zone)) dropTask(zone, event.clientY);
   });
-  section.append(title, zone);
+  section.append(zone);
   return section;
+}
+
+/** True if the dragged task may be dropped in `zone`: its own group, or one that takes moves. */
+function acceptsDrop(zone) {
+  return !zone.dataset.noMoves || zone.dataset.key === state.drag.from;
 }
 
 // --- Drag and drop -----------------------------------------------------------
@@ -962,14 +1075,17 @@ function removeMarker() {
   document.querySelectorAll(".drop-marker").forEach((m) => m.remove());
 }
 
+/** Return the node rows go before at the end of a zone: No project's hint, or null (the very end). */
+function zoneEnd(zone) {
+  return zone.querySelector(".drop-hint");
+}
+
 /** Show where a dragged task would land. */
 function placeMarker(zone, clientY) {
   removeMarker();
   const rows = otherRows(zone);
   const index = dropIndex(zone, clientY);
-  const marker = el("div", "drop-marker");
-  if (index < rows.length) zone.insertBefore(marker, rows[index]);
-  else zone.append(marker);
+  zone.insertBefore(el("div", "drop-marker"), rows[index] || zoneEnd(zone));
 }
 
 // --- Background saving ------------------------------------------------------
@@ -1004,10 +1120,13 @@ function enqueue(row, what, request, steps = WRITE_FAILED_STEPS) {
   });
 }
 
-/** Save a drop: a reorder within a group, or a move to another priority. */
+/**
+ * Save a drop in Today's view: a reorder within a group, or a move to another
+ * group (another priority, or another project or area). The server works out
+ * which, and the group's full order, from the order shown here.
+ */
 function dropTask(zone, clientY) {
-  const { id, from } = state.drag;
-  const to = zone.dataset.priority;
+  const { id } = state.drag;
   const rows = otherRows(zone);
   const index = dropIndex(zone, clientY);
   const ids = rows.map((r) => r.dataset.id);
@@ -1016,10 +1135,9 @@ function dropTask(zone, clientY) {
   // Show the task in its new place straight away.
   const row = document.querySelector(`.task[data-id="${CSS.escape(id)}"]`);
   fillZone(zone);
-  zone.insertBefore(row, rows[index] || null);
-  enqueue(row, "the move", () => from === to
-    ? api("/api/order", { priority: to, order: ids })
-    : api("/api/move", { id, priority: to, order: ids }));
+  zone.insertBefore(row, rows[index] || zoneEnd(zone));
+  const body = { view: state.todayView, key: zone.dataset.key, id, order: ids };
+  enqueue(row, "the move", () => api("/api/drop", body));
 }
 
 /**
@@ -1358,7 +1476,10 @@ function editorDates() {
 
 /** Ask the server what saving `changes` would do (see preview_edit in serve.py). */
 function requestPreview(changes) {
-  return api("/api/edit/preview", { id: state.edit.task.id, list: state.list, changes });
+  const body = { id: state.edit.task.id, list: state.list, changes };
+  // In Today, the place returned is the row's group in the view and tag shown.
+  if (state.list === "today") Object.assign(body, { view: state.todayView, tag: state.tag });
+  return api("/api/edit/preview", body);
 }
 
 /**
@@ -1498,8 +1619,10 @@ async function saveEditor() {
 
 /**
  * Replace the editor card with the task's predicted row, where it will appear:
- * in place, at the end of its new priority group (before completed tasks), or
- * nowhere if it leaves this list. Returns the row, or null if it was removed.
+ * in place, at the end of its new group in Today's view (before completed
+ * tasks), or nowhere if it leaves this list. A group not drawn yet (a project
+ * new to Today) shows the row in place until the reload. Returns the row, or
+ * null if it was removed.
  */
 function placeRow(card, preview) {
   if (!preview.place) {
@@ -1508,11 +1631,11 @@ function placeRow(card, preview) {
   }
   const group = state.list === "today" ? preview.place : null;
   const row = taskRow(preview.row, group);
-  const zone = group && document.querySelector(`.drop-zone[data-priority="${group}"]`);
+  const zone = group && document.querySelector(`.drop-zone[data-key="${CSS.escape(group)}"]`);
   if (zone && card.parentNode !== zone) {
     card.remove();
     fillZone(zone);
-    zone.insertBefore(row, zone.querySelector(".task.done"));
+    zone.insertBefore(row, zone.querySelector(".task.done") || zoneEnd(zone));
   } else {
     card.replaceWith(row);
   }
@@ -2336,11 +2459,17 @@ async function load() {
   renderSidebar();
   try {
     const list = state.list;
-    const hide = state.hideCompleted ? "&hide_completed=1" : "";
-    const data = await api(`/api/list?name=${encodeURIComponent(list)}${hide}`);
+    const shown = [state.todayView, state.tag]; // A view or tag chosen meanwhile makes this answer stale.
+    let query = `name=${encodeURIComponent(list)}`;
+    if (state.hideCompleted) query += "&hide_completed=1";
+    if (list === "today") {
+      query += `&view=${state.todayView}`;
+      if (state.tag !== null) query += `&tag=${encodeURIComponent(state.tag)}`;
+    }
+    const data = await api(`/api/list?${query}`);
     // A refresh can take seconds (it may write to Things). Don't draw over an
-    // editor, drag or change started meanwhile, or a list chosen since.
-    if (blocked() || state.list !== list) return;
+    // editor, drag or change started meanwhile, or a list, view or tag chosen since.
+    if (blocked() || state.list !== list || state.todayView !== shown[0] || state.tag !== shown[1]) return;
     if (!data.token_set) { showSetup(true); return; }
     state.counts = data.counts;
     state.priorities = data.priorities;

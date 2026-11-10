@@ -24,6 +24,12 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 *Today in Do Things, with sample data. "Reserve hotel" is the next step of the sequential **Vacation** project (task 2 of 5; "Book flights" is done). Below Follow Up, the Next Up group holds one reminder from each project tagged `Next Up` (listed in Settings with P4): the next book in **Books to read** (task 1 of 4) and the next chore in **Chores** (task 2 of 3). "Water the plants" was checked off today.*
 
 - **Today in five priorities.** Today's tasks are grouped by their `P1` to `P5` tags, under the names set in Settings (a priority with no name shows just its tag). Within each group you set the order by dragging. Tasks you haven't ordered follow Things' Today order, and tasks from the same project keep their order from that project.
+- **Today three ways, and a tag bar.** A switch beside Today's title chooses the view; your browser remembers it.
+  - **Priority:** the five priority groups above.
+  - **Project:** a group for each project, and for each area with tasks directly in it, in the order of Things' sidebar, then **No project**. Drag a task to another group to move it to that project or area in Things (its priority stays the same). Things can't take a task out of a project or area, so No project takes no tasks from other groups.
+  - **All:** one list, by priority until you drag tasks into your own order.
+  - Within any group, dragging sets Do Things' own order for that view; Things' order isn't changed. In Project and All, each task shows its priority as a colored pill.
+  - The **tag bar** under the title shows only the tasks with the tag you pick, in any view (P tags aren't listed; the priorities already show). **All** shows everything again; a reload starts at All.
 - **Priority rules kept for you.** On every refresh (page load, returning to the window, and every 60 seconds):
   1. A task due today or overdue is tagged P1 (unless **Auto assign due and overdue tasks P1** is off in Settings).
   2. A task with more than one P tag keeps only the highest.
@@ -35,18 +41,19 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
   - **A deadline after today** is always kept.
   - With **Auto assign due and overdue tasks P1** off, moves never change the deadline.
 - **Sequential projects.** In **Settings › Sequential projects**, list the project tags you use in Things, each with a priority (for example `Sequential` → P2 for work in order, and `Next Up` → P4 for lower-priority projects you want to be reminded of, such as books to read, shows to watch or chores to do). Tag a Things project with one of them and Do Things brings its tasks into Today one at a time, in project order. When you check one off, the next one starts. Each such task shows its place, for example "Vacation · task 2 of 5". If you uncheck a task, the task it started goes back. The project's tasks in Today without a P tag, including ones you dated yourself, get the priority set beside the tag. A project with two listed tags uses the higher priority; Do Things never changes a project's tags. The list starts empty.
-- **Saved searches.** Build your own searches in the sidebar from priority, tag, text (in the title or notes), project or area, and an overdue deadline. A search covers Today or all open tasks, and lists the tasks that match every criterion you set; within one criterion, any of the values you choose matches (for example tags Calls or Errand). You start with P1, P2, P3, P4 and Overdue, which you can change or delete like any other. The **Searches** heading collapses the list (▾/▸), and **+** starts a new one. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
+- **Saved searches.** Build your own searches in the sidebar from priority, tag, text (in the title or notes), project or area, and an overdue deadline. A search covers Today or all open tasks, and lists the tasks that match every criterion you set; within one criterion, any of the values you choose matches (for example tags Calls or Errand). You start with P1, P2, P3, P4 and Overdue, which you can change or delete like any other. The **Searches** heading collapses the list (▾/▸), and **+** starts a new one. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks in the Priority view (they reappear while you drag a task, so you can drop it into any priority).
 - **Reset a sequential project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
-- **Calendar events in Today.** Turn on **Settings › Calendar events** and today's events from macOS Calendar appear above the priority groups, as in Things: all-day events first, then by time, each in its calendar's color. Ended events are dimmed, the current one's time is red, and clicking one opens it in Calendar. Choose which calendars to show. Do Things only reads your calendars.
+- **Calendar events in Today.** Turn on **Settings › Calendar events** and today's events from macOS Calendar appear above the tasks in every view, as in Things: all-day events first, then by time, each in its calendar's color. Ended events are dimmed, the current one's time is red, and clicking one opens it in Calendar. Choose which calendars to show. Do Things only reads your calendars.
 - **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Move to Trash** in the same card moves an open task to Things' Trash after you confirm it (put it back from the Trash in Things if needed). **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
-- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a search can list more than one priority, each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
+- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a list can show more than one priority (Today's Project and All views, and searches), each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
 - **Things' other lists one click away.** Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open in Things. The sidebar shows the Inbox count and Today's due and open counts, as in Things.
 
 ## Advantages over Things
 | | Things 3 | Do Things |
 |---|---|---|
-| **Priorities** | No priority field. Today is one list. | Four priority groups. Drag between them, and tags and deadlines follow the rules above. |
+| **Priorities** | No priority field. Today is one list. | Five priority groups. Drag between them, and tags and deadlines follow the rules above. |
+| **Today by project** | Today is one list; each task names its project. | Switch Today to one group per project or area, and drag a task to another project or area. |
 | **Moving tasks** | Moving a task in Today changes only its position. | Moving a task to another group changes its priority and, where the rules say so, its deadline and start date. |
 | **Sequential projects** | Every task in a project is available at once, and a someday list is easy to forget while a reminder for every item clutters Today. | A project with a tag you list in Settings releases one task at a time into Today, in order, at the priority you chose for that tag, and shows each task's place in the project. A low priority (such as P4) keeps just the next item of a someday list below the day's real work. |
 | **Saved searches** | Quick Find and tag filters, but no saved searches in the sidebar. | Your own searches by priority, tag, text, project and deadline, one click away. |
@@ -216,21 +223,23 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `.github/workflows/release.yml` | GitHub Action that tags and releases each new version pushed to `main` |
 | `common.py` | Paths, version, logging, read-only Things database access, Things URL commands, order file, auth token |
 | `priority_check.py` | The priority, move and sequential-project rules, settings validation, grouping and ordering (pure logic) |
+| `view_check.py` | Today's Priority, Project and All views and the tag bar: groups, their order, and where a dropped or edited task goes (pure logic) |
 | `search_check.py` | Saved searches: the default searches, checking a search, which tasks it lists and in what order, and the line describing it (pure logic) |
 | `serve.py` | Entry point: local server and JSON API |
-| `debug_things.py` | Read-only diagnostic |
+| `debug_things.py` | Read-only diagnostic (also lists projects and areas in the order the Project view uses) |
 | `calendar_check.py` | Calendar event rules: checking what Calendar returned, which events show, their order, time labels and ended/now states (pure logic) |
 | `debug_calendar.py` | Read-only check that today's calendar events can be read |
 | `index.html` | The page: sidebar, task lists, drag-and-drop, editor, settings and token setup |
 | `screenshots/today.png` | The Today screenshot shown in this guide (sample data) |
 | `test_priority_check.py` | Tests for the rules |
 | `test_search_check.py` | Tests for the saved searches |
+| `test_view_check.py` | Tests for Today's views and the tag bar |
 | `test_common.py` | Tests for token handling, dates, time zone, URLs, saved files and database queries |
 | `test_serve.py` | Tests for the server against a mock Things database |
 | `test_calendar_check.py` | Tests for the calendar event rules |
 | `test_debug_calendar.py` | Tests for the calendar diagnostic's report (Calendar mocked) |
 | `errors.log`, `run.log` | Runtime logs (untracked). `errors.log` is capped at 1 MB, with the previous one kept as `errors.log.1` |
-| `task_order.json` | Saved order within each priority; tasks that leave Today are dropped from it (untracked) |
+| `task_order.json` | The order you dragged in each view: within each priority, in All, and within each project or area; tasks that leave Today are dropped from it (untracked) |
 | `sequence_pulls.json` | The task Do Things started in each sequential project, so it can be undone (untracked) |
 | `settings.json` | Your settings: priority names, Auto assign P1, the priority for new Today tasks, the sequential-project tags and calendar events (untracked) |
 | `searches.json` | Your saved searches, in sidebar order (untracked) |
@@ -244,6 +253,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - In a sequential project, Do Things only ever undoes a task it started itself, and not if you've changed that task's date since. **Reset other tasks** changes other tasks of the project only when you click **Reset**, after showing which ones.
 - Calendar events are read only: Do Things never adds, changes or removes an event. Calendar is read only while events are turned on, and only turning them on in Settings can make macOS ask for access.
 - Searches only read: building, previewing, saving or deleting a search never changes a task.
+- Dragging a task to another group in the Project view changes only that task's project or area, after you drop it, and is confirmed like any other change.
 - Do Things never changes projects, only tasks. A project with two of the tags listed in Settings keeps both; the higher priority is used.
 - The server listens only on your Mac (`127.0.0.1`). It accepts only requests addressed to itself, and only accepts changes carrying a header that other websites can't add.
 - The auth token is never written to logs.

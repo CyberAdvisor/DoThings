@@ -6,9 +6,12 @@ the read-only calendar script (today's events from macOS Calendar), the local
 task-order file, the user's settings and saved-search files and the auth
 token.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): read_sidebar reads Things' open projects and its areas in
+  sidebar order (Today's Project view); load_order keeps the All and Project
+  view orders.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Saved searches in searches.json (SEARCHES_PATH,
@@ -72,9 +75,11 @@ from priority_check import (
     Change,
     Settings,
     Task,
+    is_order_key,
     parse_settings,
 )
 from search_check import DEFAULT_SEARCHES, Search, parse_searches, searches_json
+from view_check import ListEntry
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
@@ -433,6 +438,35 @@ def read_edit_options(conn: sqlite3.Connection) -> Dict[str, list]:
         )
     ]
     return {"tags": tags, "areas": areas, "projects": projects, "headings": headings}
+
+
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """True if Things' `table` has `column` (its schema is undocumented and can change)."""
+    return any(row["name"] == column for row in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def read_sidebar(conn: sqlite3.Connection) -> List[ListEntry]:
+    """Return Things' open projects and its areas in sidebar order.
+
+    Projects outside an area come first, then each area followed by its
+    projects, each by its sidebar position (`index`). If a table has no
+    `index` column (an older or changed schema), it is read by title instead.
+    """
+    area_order = '"index", title COLLATE NOCASE' if _has_column(conn, "TMArea", "index") else "title COLLATE NOCASE"
+    areas = [(row["uuid"], row["title"] or "") for row in conn.execute(f"SELECT uuid, title FROM TMArea ORDER BY {area_order}")]
+    area_titles = dict(areas)
+    by_area: Dict[Optional[str], List[ListEntry]] = {}
+    for row in conn.execute(
+        f"SELECT uuid, title, area FROM TMTask WHERE type = {TYPE_PROJECT} AND status = {STATUS_OPEN} "
+        'AND trashed = 0 ORDER BY "index", title COLLATE NOCASE'
+    ):
+        area = row["area"] if row["area"] in area_titles else None  # An unknown area counts as none.
+        by_area.setdefault(area, []).append(ListEntry(row["uuid"], row["title"] or "", "project", area_titles.get(area)))
+    entries = list(by_area.get(None, []))
+    for area_id, title in areas:
+        entries.append(ListEntry(area_id, title, "area"))
+        entries.extend(by_area.get(area_id, []))
+    return entries
 
 
 def count_inbox(conn: sqlite3.Connection) -> int:
@@ -878,17 +912,20 @@ def _save_json(data: object, path: str) -> None:
 
 
 def load_order(path: str = ORDER_PATH) -> Dict[str, List[str]]:
-    """Load the saved order within each priority; an unreadable file counts as empty."""
+    """Load the saved orders (each priority, All, each Project view group); an unreadable file counts as empty.
+
+    Unknown keys and entries that aren't lists of ids are ignored.
+    """
     data = _load_json_object(path)
     return {
-        p: [i for i in data.get(p, []) if isinstance(i, str)]
-        for p in PRIORITIES
-        if isinstance(data.get(p), list)
+        key: [i for i in ids if isinstance(i, str)]
+        for key, ids in data.items()
+        if is_order_key(key) and isinstance(ids, list)
     }
 
 
 def save_order(order: Dict[str, List[str]], path: str = ORDER_PATH) -> None:
-    """Save the order within each priority."""
+    """Save the orders of every view."""
     _save_json(order, path)
 
 

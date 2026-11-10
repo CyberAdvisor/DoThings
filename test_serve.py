@@ -3,9 +3,12 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Tests for Today's views, the tag filter and /api/drop
+  (moves between priorities and projects, refusals, filtered reorders, the
+  edit preview's place per view); move tests use /api/drop.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Tests for saved searches (listing, criteria, summary,
@@ -152,13 +155,13 @@ class MissingTagTests(MockThingsTestCase):
 
     def test_move_to_missing_tag_refused_with_instructions(self) -> None:
         with self.assertRaises(serve.ApiError) as raised:
-            serve.move_task({"id": "task1", "priority": "P3", "order": ["task1"]})
+            serve.drop_task({"view": "priority", "key": "P3", "id": "task1", "order": ["task1"]})
         self.assertEqual(raised.exception.status, 409)
         self.assertIn("Create the P3 tag in Things first", raised.exception.message)
         self.apply_change.assert_not_called()
 
     def test_move_to_existing_tag_allowed(self) -> None:
-        self.assertEqual(serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]}), {"ok": True})
+        self.assertEqual(serve.drop_task({"view": "priority", "key": "P1", "id": "task1", "order": ["task1"]}), {"ok": True})
         self.apply_change.assert_called_once()
 
 
@@ -442,7 +445,7 @@ class SequenceTagTests(MockThingsTestCase):
         response = serve.list_response("today")
         self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4", "P5"])
         group = response["groups"][3]
-        self.assertEqual((group["priority"], group["label"]), ("P4", "Next Up"))
+        self.assertEqual((group["key"], group["label"], group["note"]), ("P4", "Next Up", "P4"))
         self.assertEqual([(t["id"], t["sequence"], t["tags"]) for t in group["tasks"]], [("b1", "task 1 of 2", [])])
         self.assertEqual([t["id"] for t in serve.list_response("p4")["tasks"]], ["b1"])
 
@@ -517,7 +520,9 @@ class SequenceTagTests(MockThingsTestCase):
 
     def test_move_to_p4(self) -> None:
         self.start("b2")
-        self.assertEqual(serve.move_task({"id": "b2", "priority": "P4", "order": ["b2"]}), {"ok": True})
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('b2', 'P2')")  # Shown in P2, so the drop is a move.
+        self.assertEqual(serve.drop_task({"view": "priority", "key": "P4", "id": "b2", "order": ["b2"]}), {"ok": True})
         self.assertEqual(self.apply_change.call_args[0][0].tags, ["P4"])
 
 
@@ -657,7 +662,7 @@ class CompletionTests(MockThingsTestCase):
     def test_completed_task_cannot_be_moved(self) -> None:
         self.add_completed_task("done1")
         with self.assertRaises(serve.ApiError) as raised:
-            serve.move_task({"id": "done1", "priority": "P1", "order": ["done1"]})
+            serve.drop_task({"view": "priority", "key": "P1", "id": "done1", "order": ["done1"]})
         self.assertIn("Uncheck", raised.exception.message)
 
     def test_completed_tasks_listed_last_and_flagged(self) -> None:
@@ -762,7 +767,7 @@ class SettingsApiTests(MockThingsTestCase):
         response = serve.list_response("today")
         self.apply_change.assert_not_called()  # Due today, but it keeps P3.
         self.assertEqual([t["id"] for t in response["groups"][2]["tasks"]], ["task1"])
-        serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]})
+        serve.drop_task({"view": "priority", "key": "P1", "id": "task1", "order": ["task1"]})
         sent = self.apply_change.call_args[0][0]
         self.assertEqual((sent.tags, sent.set_deadline, sent.clear_deadline), (["P1"], None, False))
 
@@ -874,7 +879,7 @@ class EditTests(MockThingsTestCase):
         super().setUp()
         self.add_tags("P2", "P3", "P4", "P5", "Home")
         with write_db(self.db_path) as conn:
-            conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
+            conn.execute("INSERT INTO TMArea (uuid, title) VALUES ('area1', 'Work')")
             conn.executemany(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, project, \"index\") "
                 "VALUES (?, ?, ?, 0, 0, ?, 0)",
@@ -1030,7 +1035,7 @@ class SearchTests(MockThingsTestCase):
         later = pack_things_date(TODAY + timedelta(days=3))
         past = pack_things_date(TODAY - timedelta(days=2))
         with write_db(self.db_path) as conn:
-            conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
+            conn.execute("INSERT INTO TMArea (uuid, title) VALUES ('area1', 'Work')")
             conn.execute(
                 "INSERT INTO TMTask (uuid, title, type, status, trashed, project, \"index\") "
                 "VALUES ('proj1', 'Vacation', 1, 0, 0, NULL, 0)"
@@ -1193,6 +1198,163 @@ class RowDisplayTests(unittest.TestCase):
                 self.assertEqual(serve.reminder_label(dt_time(hour, minute)), label)
         self.assertIsNone(serve.reminder_label(None))
         self.assertIsNone(serve.task_to_json(Task(uuid="A1", title="T"), TODAY)["reminder_label"])
+
+
+class TodayViewTests(MockThingsTestCase):
+    """Today by priority, by project or all in one list, the tag bar, and drops in each view."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3", "P4", "P5", "Calls")
+        with write_db(self.db_path) as conn:
+            conn.execute('INSERT INTO TMArea (uuid, title, "index") VALUES (\'home\', \'Home Chores\', 1)')
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, start, area, \"index\") "
+                "VALUES (?, ?, 1, 0, 0, 1, ?, ?)",
+                [("vac", "Vacation", None, 0), ("books", "Books to read", "home", 0)],
+            )
+            tasks = [
+                # uuid, todayIndex, project, area, tags
+                ("hotel", 1, "vac", None, ["P2", "Calls"]),
+                ("chore", 2, None, "home", ["P3"]),
+                ("book", 3, "books", None, ["P4"]),
+                ("call", 4, None, "home", ["P2", "Calls"]),
+            ]
+            for uuid, index, project, area, tags in tasks:
+                conn.execute(
+                    "INSERT INTO TMTask (uuid, title, type, status, trashed, start, startDate, todayIndex, "
+                    "project, area, \"index\") VALUES (?, ?, 0, 0, 0, 1, ?, ?, ?, ?, 0)",
+                    (uuid, uuid, pack_things_date(TODAY), index, project, area),
+                )
+                conn.executemany("INSERT INTO TMTaskTag VALUES (?, ?)", [(uuid, t) for t in tags])
+
+    def keys(self, response: dict) -> list:
+        """(group key, task ids) per group."""
+        return [(g["key"], [t["id"] for t in g["tasks"]]) for g in response["groups"]]
+
+    def test_priority_view_unchanged(self) -> None:
+        response = serve.list_response("today")
+        self.assertEqual((response["view"], response["tag"], response["tags"]), ("priority", None, ["Calls"]))
+        self.assertEqual(self.keys(response)[:3], [("P1", []), ("P2", ["task1", "hotel", "call"]), ("P3", ["chore"])])
+        row = response["groups"][1]["tasks"][1]
+        self.assertEqual((row["context"], row["priority"]), ("Vacation", None))
+
+    def test_project_view(self) -> None:
+        response = serve.list_response("today", view="project")
+        self.assertEqual(
+            self.keys(response),
+            [("project:vac", ["hotel"]), ("project:home", ["chore", "call"]),
+             ("project:books", ["book"]), ("project:none", ["task1"])],
+        )
+        self.assertEqual(
+            [(g["label"], g["note"], g["list_id"], g["takes_moves"]) for g in response["groups"]],
+            [("Vacation", "Project", "vac", True), ("Home Chores", "Area", "home", True),
+             ("Books to read", "Project · Home Chores", "books", True), ("No project", "", None, False)],
+        )
+        row = response["groups"][0]["tasks"][0]
+        self.assertEqual((row["context"], row["priority"], row["tags"]), ("", "P2", ["Calls"]))
+
+    def test_all_view(self) -> None:
+        response = serve.list_response("today", view="all")
+        self.assertEqual(self.keys(response), [("all", ["task1", "hotel", "call", "chore", "book"])])
+        row = response["groups"][0]["tasks"][3]
+        self.assertEqual((row["context"], row["priority"]), ("Home Chores", "P3"))
+
+    def test_tag_filter(self) -> None:
+        response = serve.list_response("today", tag="Calls")
+        self.assertEqual(response["tag"], "Calls")
+        self.assertEqual(self.keys(response)[1], ("P2", ["hotel", "call"]))
+        self.assertEqual(self.keys(serve.list_response("today", view="project", tag="Calls")),
+                         [("project:vac", ["hotel"]), ("project:home", ["call"])])
+        self.assertEqual(serve.list_response("today", tag="Calls")["counts"], serve.list_response("today")["counts"])
+
+    def test_bad_view_or_tag(self) -> None:
+        for kwargs in ({"view": "grid"}, {"tag": ""}, {"tag": "x" * 201}):
+            with self.assertRaises(serve.ApiError) as raised:
+                serve.list_response("today", **kwargs)
+            self.assertEqual(raised.exception.status, 400)
+
+    def test_saved_view_orders_pruned_with_today(self) -> None:
+        saved = {"all": ["hotel", "gone"], "project:vac": ["gone"], "P2": ["call"]}
+        with mock.patch.object(serve, "load_order", return_value=saved):
+            response = serve.list_response("today", view="all")
+        self.assertEqual(self.keys(response)[0][1][:3], ["hotel", "call", "task1"])  # All order, then by P2 order.
+        kept = serve.save_order.call_args[0][0]
+        self.assertEqual((kept["all"], kept["P2"]), (["hotel"], ["call"]))
+        self.assertNotIn("project:vac", kept)
+
+    def drop(self, view: str, key: str, task_id: str, order: list) -> dict:
+        """Drop `task_id` into group `key` of `view`, the page showing `order`."""
+        self.apply_change.reset_mock()
+        serve.save_order.reset_mock()
+        return serve.drop_task({"view": view, "key": key, "id": task_id, "order": order})
+
+    def test_reorder_through_the_tag_filter_keeps_hidden_tasks(self) -> None:
+        # The page shows only Calls tasks: call dropped above hotel; task1 is hidden.
+        self.assertEqual(self.drop("priority", "P2", "call", ["call", "hotel"]), {"ok": True})
+        self.apply_change.assert_not_called()
+        self.assertEqual(serve.save_order.call_args[0][0]["P2"], ["task1", "call", "hotel"])
+
+    def test_priority_move(self) -> None:
+        self.assertEqual(self.drop("priority", "P3", "hotel", ["chore", "hotel"]), {"ok": True})
+        self.assertEqual(self.apply_change.call_args[0][0].tags, ["Calls", "P3"])
+        self.assertEqual(serve.save_order.call_args[0][0]["P3"], ["chore", "hotel"])
+
+    def test_project_move(self) -> None:
+        self.assertEqual(self.drop("project", "project:vac", "chore", ["hotel", "chore"]), {"ok": True})
+        change = self.apply_change.call_args[0][0]
+        self.assertEqual((change.set_list_id, change.tags), ("vac", None))  # Priority kept.
+        order = serve.save_order.call_args[0][0]
+        self.assertEqual(order["project:vac"], ["hotel", "chore"])
+
+    def test_project_move_to_area_and_reorder_in_a_group(self) -> None:
+        self.assertEqual(self.drop("project", "project:home", "book", ["book", "chore", "call"]), {"ok": True})
+        self.assertEqual(self.apply_change.call_args[0][0].set_list_id, "home")
+        self.assertEqual(self.drop("project", "project:home", "call", ["call", "chore"]), {"ok": True})
+        self.apply_change.assert_not_called()
+        self.assertEqual(serve.save_order.call_args[0][0]["project:home"], ["call", "chore"])
+
+    def test_unconfirmed_move_saves_no_order(self) -> None:
+        self.apply_change.return_value = False
+        self.assertEqual(self.drop("project", "project:vac", "chore", ["chore", "hotel"]),
+                         {"ok": False, "write_failed": True})
+        serve.save_order.assert_not_called()
+
+    def test_all_view_only_reorders(self) -> None:
+        self.assertEqual(self.drop("all", "all", "book", ["book", "task1"]), {"ok": True})
+        self.apply_change.assert_not_called()
+        self.assertEqual(serve.save_order.call_args[0][0]["all"], ["book", "task1", "hotel", "call", "chore"])
+
+    def test_refused_drops(self) -> None:
+        cases = [
+            (("project", "project:none", "hotel", ["task1", "hotel"]), 409, "out of a project"),
+            (("project", "project:zzz", "hotel", ["hotel"]), 400, "Unknown project"),
+            (("all", "P1", "hotel", ["hotel"]), 400, "can't be moved"),
+            (("priority", "all", "hotel", ["hotel"]), 400, "can't be moved"),
+            (("priority", "P2", "nothere", ["nothere"]), 404, "no longer in Today"),
+            (("priority", "P2", "hotel", ["call"]), 400, "Invalid task order"),
+            (("grid", "P2", "hotel", ["hotel"]), 400, "Unknown view"),
+            (("priority", "P9", "hotel", ["hotel"]), 400, "Unknown group"),
+        ]
+        for args, status, text in cases:
+            with self.subTest(args=args), self.assertRaises(serve.ApiError) as raised:
+                self.drop(*args)
+            self.assertEqual(raised.exception.status, status)
+            self.assertIn(text, raised.exception.message)
+        self.apply_change.assert_not_called()
+        serve.save_order.assert_not_called()
+
+    def test_preview_place_in_each_view(self) -> None:
+        preview = lambda **body: serve.preview_edit({"id": "hotel", "list": "today", **body})
+        moved = preview(view="project", changes={"list_id": "books"})
+        self.assertEqual(moved["place"], "project:books")
+        self.assertEqual((moved["row"]["context"], moved["row"]["priority"]), ("", "P2"))
+        self.assertEqual(preview(view="all", changes={"title": "Hotel"})["place"], "all")
+        self.assertEqual(preview(view="all", changes={})["row"]["context"], "Vacation")
+        self.assertEqual(preview(changes={"priority": "P3"})["place"], "P3")
+        self.assertIsNone(preview(view="all", tag="Calls", changes={"tags": []})["place"])  # Loses the chosen tag.
+        with self.assertRaises(serve.ApiError):
+            preview(view="grid", changes={})
 
 
 class ListRoutingTests(MockThingsTestCase):

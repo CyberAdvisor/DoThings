@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.9.2
+Version: 2.0.0
 
 Change log:
+- v2.0.0 (2026-11-10): Tests for read_sidebar (sidebar order, no TMArea.index)
+  and the view orders in task_order.json; TMArea has an index column.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.
 - v1.9.0 (2026-11-10): Tests for the searches file and the list of every open
@@ -88,6 +90,7 @@ from common import (
     read_list,
     read_raw_reminder_times,
     read_sequential_projects,
+    read_sidebar,
     read_task,
     run_trash_script,
     save_order,
@@ -124,7 +127,7 @@ CREATE TABLE TMTask (
     stopDate REAL, rt1_recurrenceRule BLOB, rt1_repeatingTemplate TEXT, notes TEXT,
     reminderTime INTEGER
 );
-CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT);
+CREATE TABLE TMArea (uuid TEXT PRIMARY KEY, title TEXT, "index" INTEGER);
 CREATE TABLE TMTag (uuid TEXT PRIMARY KEY, title TEXT);
 CREATE TABLE TMTaskTag (tasks TEXT, tags TEXT);
 CREATE TABLE TMChecklistItem (uuid TEXT PRIMARY KEY, title TEXT, status INTEGER, task TEXT, "index" INTEGER);
@@ -410,6 +413,62 @@ class OrderFileTests(unittest.TestCase):
             with self.assertLogs("dothings", level="ERROR"):
                 self.assertEqual(load_order(path), {})
 
+    def test_view_orders_kept_and_unknown_keys_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "task_order.json")
+            saved = {"P1": ["A"], "all": ["B", "A"], "project:x1": ["C"], "junk": ["D"], "P2": "not a list"}
+            save_order(saved, path)
+            self.assertEqual(load_order(path), {"P1": ["A"], "all": ["B", "A"], "project:x1": ["C"]})
+
+
+class SidebarTests(unittest.TestCase):
+    """Projects and areas in Things' sidebar order (Today's Project view)."""
+
+    def make_db(self, folder: str, area_index: bool = True) -> str:
+        """Build a database with two areas and four projects, one closed; optionally no TMArea.index."""
+        path = os.path.join(folder, "main.sqlite")
+        schema = SCHEMA if area_index else SCHEMA.replace(', "index" INTEGER);\nCREATE TABLE TMTag', ');\nCREATE TABLE TMTag')
+        with write_db(path) as conn:
+            conn.executescript(schema)
+            if area_index:
+                conn.executemany('INSERT INTO TMArea (uuid, title, "index") VALUES (?, ?, ?)',
+                                 [("work", "Work", 2), ("home", "Home", 1)])
+            else:
+                conn.executemany("INSERT INTO TMArea (uuid, title) VALUES (?, ?)", [("work", "Work"), ("home", "Home")])
+            projects = [
+                # uuid, title, status, area, index
+                ("solo", "Solo", STATUS_OPEN, None, 5),
+                ("first", "First", STATUS_OPEN, None, 1),
+                ("garden", "Garden", STATUS_OPEN, "home", 0),
+                ("report", "Report", STATUS_OPEN, "work", 0),
+                ("old", "Old", STATUS_COMPLETED, "work", 1),
+                ("lost", "Lost area", STATUS_OPEN, "gone", 9),
+            ]
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, area, \"index\") VALUES (?, ?, 1, ?, 0, ?, ?)",
+                projects,
+            )
+        return path
+
+    def test_projects_outside_areas_then_each_area_with_its_projects(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, open_things_db(self.make_db(folder)) as conn:
+            entries = read_sidebar(conn)
+        self.assertEqual(
+            [(e.id, e.kind, e.area) for e in entries],
+            [
+                ("first", "project", None), ("solo", "project", None), ("lost", "project", None),
+                ("home", "area", None), ("garden", "project", "Home"),
+                ("work", "area", None), ("report", "project", "Work"),
+            ],
+        )
+
+    def test_areas_by_title_without_index_column(self) -> None:
+        with tempfile.TemporaryDirectory() as folder, open_things_db(self.make_db(folder, False)) as conn:
+            columns = [row["name"] for row in conn.execute("PRAGMA table_info(TMArea)")]
+            entries = read_sidebar(conn)
+        self.assertNotIn("index", columns)
+        self.assertEqual([e.id for e in entries if e.kind == "area"], ["home", "work"])
+
 
 class SettingsFileTests(unittest.TestCase):
     """The user's settings file."""
@@ -477,7 +536,7 @@ class DatabaseTests(unittest.TestCase):
         conn = sqlite3.connect(self.path)
         conn.executescript(SCHEMA)
         conn.executemany("INSERT INTO TMTag VALUES (?, ?)", [("t1", "P1"), ("t2", "P2"), ("t3", "Home, Office")])
-        conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
+        conn.execute("INSERT INTO TMArea (uuid, title) VALUES ('area1', 'Work')")
         today = pack_things_date(TODAY)
         past = pack_things_date(TODAY - timedelta(days=3))
         future = pack_things_date(TODAY + timedelta(days=3))
