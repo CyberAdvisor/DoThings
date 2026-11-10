@@ -19,3 +19,6 @@ sequence_pulls.json
 
 # The user's settings (priority names and options)
 settings.json
+
+# The user's saved searches
+searches.json

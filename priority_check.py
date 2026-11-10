@@ -9,9 +9,11 @@ display. It also decides which priority a sequential project's tasks get
 starts next, and validates the user's settings (priority names, options,
 sequential-project tags and calendar events).
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): place_in_list is now place_in_today (Today's groups
+  only); search membership moved to search_check.py.
 - v1.8.0 (2026-11-10): Settings for calendar events in Today
   (calendar_events, off by default, and hidden_calendars, the calendars the
   user unchecked).
@@ -462,21 +464,13 @@ def predict(task: Task, change: Change, today: date, settings: Settings = DEFAUL
     return after
 
 
-def place_in_list(task: Task, name: str, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[str]:
-    """Return where `task` appears in the app list `name`, or None if it isn't listed.
+def place_in_today(task: Task, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[str]:
+    """Return the Today group (P1-P5) `task` appears in, or None if it isn't in Today.
 
-    For "today" this is its priority group (P1-P5); for a search, "list".
-    Mirrors the list queries in common.py for a task already refreshed.
+    Mirrors Today's list query for a task already refreshed. Searches use
+    search_check.matches instead.
     """
-    if name == "today":
-        return required_priority(task, today, settings) if in_today(task, today) else None
-    if name.upper() in PRIORITIES:
-        listed = in_today(task, today) and current_priority(task.tags) == name.upper()
-    elif name == "overdue":
-        listed = task.deadline is not None and task.deadline < today
-    else:
-        raise ValueError(f"Unknown list: {name!r}")
-    return "list" if listed else None
+    return required_priority(task, today, settings) if in_today(task, today) else None
 
 
 def deadline_state(deadline: Optional[date], today: date) -> Optional[str]:

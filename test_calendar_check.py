@@ -1,8 +1,9 @@
 """Tests for calendar_check.py: checking the calendar script's output, ordering, labels and states.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Synchronized module version metadata.
 - v1.8.0 (2026-11-10): New.
 """
 

@@ -3,9 +3,12 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Tests for saved searches (listing, criteria, summary,
+  pills, the builder's preview, saving, deleting and the edit preview's place
+  in a search); searches.json kept in the temporary folder.
 - v1.8.0 (2026-11-10): Calendar reads mocked in every test (never asking);
   tests for Today's events (off by default, order, hidden and canceled
   calendars, labels and states, access states), the calendars in Settings,
@@ -47,6 +50,7 @@ from unittest import mock
 import serve
 from calendar_check import Calendar, CalendarRead, Event
 from priority_check import Settings, Task
+from search_check import Search
 from common import (
     Pull,
     START_ANYTIME,
@@ -54,9 +58,11 @@ from common import (
     STATUS_OPEN,
     THINGS_LISTS,
     load_pulls,
+    load_searches,
     load_settings,
     pack_things_date,
     save_pulls,
+    save_searches,
     save_settings,
     start_of_day,
 )
@@ -71,6 +77,7 @@ class MockThingsTestCase(unittest.TestCase):
         self.db_path = os.path.join(self.folder.name, "main.sqlite")
         self.pulls_path = os.path.join(self.folder.name, "sequence_pulls.json")
         self.settings_path = os.path.join(self.folder.name, "settings.json")
+        self.searches_path = os.path.join(self.folder.name, "searches.json")
         conn = sqlite3.connect(self.db_path)
         conn.executescript(SCHEMA)
         conn.execute("INSERT INTO TMTag VALUES ('t1', 'P1')")
@@ -95,6 +102,9 @@ class MockThingsTestCase(unittest.TestCase):
             # Settings too: the defaults unless a test saves others.
             mock.patch.object(serve, "load_settings", lambda: load_settings(self.settings_path)),
             mock.patch.object(serve, "save_settings", lambda settings: save_settings(settings, self.settings_path)),
+            # Searches too: the defaults unless a test saves others.
+            mock.patch.object(serve, "load_searches", lambda: load_searches(self.searches_path)),
+            mock.patch.object(serve, "save_searches", lambda searches: save_searches(searches, self.searches_path)),
         ]
         for patch in patches:
             patch.start()
@@ -112,6 +122,10 @@ class MockThingsTestCase(unittest.TestCase):
         """Create more tags in the mock database."""
         with write_db(self.db_path) as conn:
             conn.executemany("INSERT INTO TMTag VALUES (?, ?)", [(n, n) for n in names])
+
+    def use_searches(self, *searches: Search) -> None:
+        """Save these searches in place of the defaults."""
+        save_searches(searches, self.searches_path)
 
     def use_sequence_tags(self, *pairs: tuple) -> None:
         """Save settings that list these (project tag, priority) pairs as sequential-project tags."""
@@ -625,7 +639,7 @@ class CompletionTests(MockThingsTestCase):
                 self.assertEqual(ids(hidden), ["task1"])
                 self.assertEqual(hidden["counts"], shown["counts"])
 
-    def test_priority_pill_only_in_overdue(self) -> None:
+    def test_priority_pill_unless_search_has_one_priority(self) -> None:
         self.add_tags("Home")
         with write_db(self.db_path) as conn:
             conn.executemany("INSERT INTO TMTaskTag VALUES ('task1', ?)", [("t1",), ("Home",)])
@@ -1003,6 +1017,143 @@ class EditTests(MockThingsTestCase):
     def test_unconfirmed_edit_reported(self) -> None:
         self.apply_change.return_value = False
         self.assertEqual(self.edit(title="X"), {"ok": False, "write_failed": True})
+
+
+class SearchTests(MockThingsTestCase):
+    """Saved searches: listing, the builder's preview, saving and deleting."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.add_tags("P2", "P3", "Calls")
+        later = pack_things_date(TODAY + timedelta(days=3))
+        past = pack_things_date(TODAY - timedelta(days=2))
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
+            conn.execute(
+                "INSERT INTO TMTask (uuid, title, type, status, trashed, project, \"index\") "
+                "VALUES ('proj1', 'Vacation', 1, 0, 0, NULL, 0)"
+            )
+            rows = [
+                # uuid, title, notes, startDate, deadline, project, area
+                ("call", "Call insurance", "", pack_things_date(TODAY), None, None, "area1"),
+                ("hotel", "Book hotel", "Lisbon trip", pack_things_date(TODAY), later, "proj1", None),
+                ("late", "Late", "", pack_things_date(TODAY), past, None, None),
+                ("anytime", "Call someday", "", None, None, None, None),  # Not in Today.
+            ]
+            conn.executemany(
+                "INSERT INTO TMTask (uuid, title, notes, type, status, trashed, start, startDate, deadline, "
+                f"project, area, todayIndex, \"index\") VALUES (?, ?, ?, 0, {STATUS_OPEN}, 0, {START_ANYTIME}, "
+                "?, ?, ?, ?, 1, 0)",
+                rows,
+            )
+            conn.executemany(
+                "INSERT INTO TMTaskTag VALUES (?, ?)",
+                [("task1", "P3"), ("call", "P2"), ("call", "Calls"), ("hotel", "P2"), ("hotel", "Calls"),
+                 ("anytime", "Calls")],
+            )
+
+    def ids(self, response: dict) -> list:
+        """The task ids of a search response."""
+        return [t["id"] for t in response["tasks"]]
+
+    def test_defaults_in_sidebar(self) -> None:
+        response = serve.list_response("today")
+        self.assertEqual(
+            [s["name"] for s in response["searches"]],
+            ["P1 · Due Today", "P2 · To Do", "P3 · Follow Up", "P4 · Next Up", "Overdue"],
+        )
+        self.assertNotIn("search", response)
+
+    def test_overdue_default_covers_every_open_task(self) -> None:
+        self.assertEqual(self.ids(serve.list_response("overdue")), ["late"])
+
+    def test_custom_search_lists_matches_with_summary_and_pills(self) -> None:
+        self.use_searches(Search("s1", "Calls", tags=("Calls",)))
+        response = serve.list_response("s1")
+        # "anytime" isn't in Today.
+        self.assertEqual(self.ids(response), ["hotel", "call"])  # Deadline first.
+        self.assertEqual(response["summary"], "Today tasks · tag Calls")
+        self.assertEqual(response["search"]["tags"], ["Calls"])
+        self.assertEqual([t["priority"] for t in response["tasks"]], ["P2", "P2"])
+        self.assertEqual([s["id"] for s in response["searches"]], ["s1"])
+
+    def test_criteria_combine(self) -> None:
+        self.use_searches(
+            Search("a", "Text", text="lisbon"),
+            Search("b", "Work", lists=("area1",)),
+            Search("c", "All calls", tags=("Calls",), scope="all"),
+            Search("d", "P2 calls", priorities=("P2",), tags=("Calls",)),
+        )
+        self.assertEqual(self.ids(serve.list_response("a")), ["hotel"])
+        self.assertEqual(self.ids(serve.list_response("b")), ["call"])
+        found = serve.list_response("c")
+        self.assertEqual(self.ids(found), ["hotel", "call", "anytime"])
+        self.assertEqual([t["priority"] for t in found["tasks"]], ["P2", "P2", None])  # Not in Today: no P tag.
+        one = serve.list_response("d")
+        self.assertEqual(self.ids(one), ["hotel", "call"])
+        self.assertEqual([t["priority"] for t in one["tasks"]], [None, None])  # One priority: no pills.
+
+    def test_unknown_search(self) -> None:
+        with self.assertRaises(serve.ApiError) as raised:
+            serve.list_response("s9")
+        self.assertEqual(raised.exception.status, 404)
+
+    def test_preview_reads_only_and_gives_choices(self) -> None:
+        with mock.patch.object(serve, "apply_refresh_rules") as refresh, \
+                mock.patch.object(serve, "save_searches") as save:
+            preview = serve.preview_search({"search": {"name": "", "tags": ["Calls"], "scope": "all"}})
+        refresh.assert_not_called()
+        save.assert_not_called()
+        self.apply_change.assert_not_called()
+        self.assertEqual(set(self.ids(preview)), {"anytime", "call", "hotel"})
+        self.assertEqual(preview["summary"], "All open tasks · tag Calls")
+        self.assertEqual(preview["choices"]["tags"], ["Calls"])
+        self.assertEqual(
+            preview["choices"]["lists"],
+            [{"id": "area1", "title": "Work", "kind": "area"}, {"id": "proj1", "title": "Vacation", "kind": "project"}],
+        )
+        with self.assertRaises(serve.ApiError):
+            serve.preview_search({"search": {"name": "X", "priorities": ["P9"]}})
+
+    def test_save_new_and_update(self) -> None:
+        saved = serve.save_search({"search": {"name": " Calls ", "tags": ["Calls"]}})
+        self.assertEqual((saved["search"]["id"], saved["search"]["name"]), ("s1", "Calls"))
+        self.assertEqual(saved["searches"][-1], {"id": "s1", "name": "Calls"})
+        serve.save_search({"search": {"id": "p2", "name": "To do now", "priorities": ["P2"]}})
+        names = [s["name"] for s in serve.list_response("today")["searches"]]
+        self.assertEqual(names, ["P1 · Due Today", "To do now", "P3 · Follow Up", "P4 · Next Up", "Overdue", "Calls"])
+
+    def test_save_refusals(self) -> None:
+        for body, status in (
+            ({"search": {"name": ""}}, 400),
+            ({"search": {"name": "overdue"}}, 400),  # Taken, ignoring case.
+            ({"search": {"name": "X", "tags": ["P1"]}}, 400),
+            ({"search": {"id": "s7", "name": "X"}}, 404),
+        ):
+            with self.subTest(body=body), self.assertRaises(serve.ApiError) as raised:
+                serve.save_search(body)
+            self.assertEqual(raised.exception.status, status)
+        self.assertFalse(os.path.exists(self.searches_path))
+
+    def test_delete(self) -> None:
+        self.assertEqual([s["id"] for s in serve.delete_search({"id": "p3"})["searches"]], ["p1", "p2", "p4", "overdue"])
+        with self.assertRaises(serve.ApiError):
+            serve.delete_search({"id": "p3"})
+        for search in ("p1", "p2", "p4", "overdue"):
+            serve.delete_search({"id": search})
+        self.assertEqual(serve.list_response("today")["searches"], [])  # Stays empty.
+        self.apply_change.assert_not_called()
+
+    def test_edit_preview_places_row_in_search(self) -> None:
+        self.use_searches(Search("s1", "Calls", tags=("Calls",)), Search("s2", "P2", priorities=("P2",)))
+        preview = lambda name, **changes: serve.preview_edit({"id": "call", "list": name, "changes": changes})
+        self.assertEqual(preview("s1")["place"], "list")
+        self.assertEqual(preview("s1")["row"]["priority"], "P2")  # Pills in a search of any priority.
+        self.assertIsNone(preview("s2")["row"]["priority"])
+        self.assertIsNone(preview("s1", tags=[])["place"])  # Removing the tag leaves the search.
+        self.assertIsNone(preview("s2", priority="P3")["place"])
+        with self.assertRaises(serve.ApiError):
+            preview("p1")  # No longer a search.
 
 
 class RowDisplayTests(unittest.TestCase):

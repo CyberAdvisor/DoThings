@@ -3,11 +3,15 @@
 Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the AppleScript that moves a to-do to the Trash,
 the read-only calendar script (today's events from macOS Calendar), the local
-task-order file, the user's settings file and the auth token.
+task-order file, the user's settings and saved-search files and the auth
+token.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Saved searches in searches.json (SEARCHES_PATH,
+  load_searches, save_searches). read_list reads Today or every open task
+  (OPEN_LISTS); the fixed P and Overdue queries and APP_LISTS are removed.
 - v1.8.0 (2026-11-10): Calendar reading: the EventKit script (moved from
   debug_calendar.py and split into reading and an access request that checks
   the access status instead of waiting for macOS's reply), run_jxa,
@@ -68,6 +72,7 @@ from priority_check import (
     Task,
     parse_settings,
 )
+from search_check import DEFAULT_SEARCHES, Search, parse_searches, searches_json
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
@@ -78,6 +83,7 @@ ORDER_PATH = os.path.join(BASE_DIR, "task_order.json")
 TOKEN_PATH = os.path.join(BASE_DIR, "auth_token.txt")
 PULLS_PATH = os.path.join(BASE_DIR, "sequence_pulls.json")
 SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
+SEARCHES_PATH = os.path.join(BASE_DIR, "searches.json")
 
 # Things 3 keeps its data in this group container. Since Things 3.15 the
 # database sits in a ThingsData-XXXXX subfolder; older versions put it directly
@@ -106,8 +112,8 @@ TYPE_TODO, TYPE_PROJECT, TYPE_HEADING = 0, 1, 2
 STATUS_OPEN, STATUS_COMPLETED = 0, 3
 START_INBOX, START_ANYTIME, START_SOMEDAY = 0, 1, 2
 
-# Lists Do Things shows itself: Today, then the custom searches.
-APP_LISTS = ("today",) + tuple(p.lower() for p in PRIORITIES) + ("overdue",)
+# What read_list reads: Today, or every open task (searches with that scope).
+OPEN_LISTS = ("today", "open")
 # Built-in Things lists that the sidebar opens in Things (things:///show?id=<list>).
 THINGS_LISTS = ("inbox", "upcoming", "anytime", "someday", "logbook")
 
@@ -304,28 +310,21 @@ _TODAY_CLAUSE = (
 
 
 def _list_query(name: str, today: int) -> Tuple[str, list, str]:
-    """Return (where clause, params, order clause) for one of APP_LISTS.
+    """Return (where clause, params, order clause) for one of OPEN_LISTS.
 
     The clause covers only what the list selects; read_list adds _ACTIVE.
-    `today` is today's date in Things' packed format.
+    `today` is today's date in Things' packed format. Searches filter these
+    lists in Python (search_check.search_results).
     """
     if name == "today":
         return _TODAY_CLAUSE, [today, today], "t.todayIndex, t.\"index\""
-    if name.upper() in PRIORITIES:
-        # Tasks in Today with the tag: a task tagged for a later start shows once it starts.
-        where = (
-            f"{_TODAY_CLAUSE} AND EXISTS (SELECT 1 FROM TMTaskTag tt JOIN TMTag tg "
-            "ON tg.uuid = tt.tags WHERE tt.tasks = t.uuid AND tg.title = ?)"
-        )
-        return where, [today, today, name.upper()], "t.deadline IS NULL, t.deadline, t.\"index\""
-    if name == "overdue":
-        where = "t.deadline IS NOT NULL AND t.deadline < ?"
-        return where, [today], "t.deadline, t.\"index\""
+    if name == "open":
+        return "1", [], "t.\"index\""
     raise ValueError(f"Unknown list: {name!r}")
 
 
 def read_list(conn: sqlite3.Connection, name: str, today: date) -> List[Task]:
-    """Return the open and today-completed to-dos in one of APP_LISTS, in Things' order."""
+    """Return the open and today-completed to-dos in one of OPEN_LISTS, in Things' order."""
     where, params, order = _list_query(name, pack_things_date(today))
     start_of_today = start_of_day(today)
     rows = conn.execute(
@@ -951,6 +950,26 @@ def load_settings(path: str = SETTINGS_PATH) -> Settings:
 def save_settings(settings: Settings, path: str = SETTINGS_PATH) -> None:
     """Save the user's settings."""
     _save_json(settings.to_json(), path)
+
+
+def load_searches(path: str = SEARCHES_PATH) -> Tuple[Search, ...]:
+    """Load the saved searches; a missing file gives the default searches.
+
+    An unreadable or invalid file is logged and the defaults are used, so the
+    sidebar always has searches (saving a search then replaces the file).
+    """
+    if not os.path.exists(path):
+        return DEFAULT_SEARCHES
+    try:
+        return parse_searches(_load_json_object(path))
+    except ValueError as error:
+        get_logger().error("Ignoring invalid searches file %s: %s", path, error)
+        return DEFAULT_SEARCHES
+
+
+def save_searches(searches: Iterable[Search], path: str = SEARCHES_PATH) -> None:
+    """Save the searches, in sidebar order."""
+    _save_json(searches_json(searches), path)
 
 
 # --- Auth token -----------------------------------------------------------

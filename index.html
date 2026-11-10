@@ -3,9 +3,15 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.8.0
+  Version: 1.9.0
 
   Change log:
+  - v1.9.0 (2026-11-10): Saved searches. The sidebar's Searches section
+    collapses (▾/▸, remembered in this browser) and + starts a new search; a
+    search page shows what it matches under its title and an Edit search
+    button. The search builder (name, Today or all open tasks, priorities,
+    tags, text, projects and areas, overdue) shows its results as you choose
+    and saves, cancels or deletes the search (after confirming).
   - v1.8.0 (2026-11-10): Today's calendar events above the priority groups
     (all-day first, then by time, in their calendar's color; ended ones
     dimmed, the current one's time in red; click opens it in Calendar), an
@@ -90,7 +96,17 @@
   .nav-item.selected { background: var(--selected); }
   .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
   .nav-gap { height: 14px; }
-  .nav-heading { color: var(--muted); font-size: 12px; font-weight: 600; padding: 4px 10px; }
+  /* Searches heading: the name collapses or expands the list; + starts a new search. */
+  .nav-heading { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 6px; }
+  .nav-heading .toggle {
+    display: flex; align-items: center; gap: 6px; background: none; border: none; color: var(--muted);
+    font-size: 12px; font-weight: 600; padding: 4px; border-radius: 5px;
+  }
+  .nav-heading .toggle:hover, .nav-heading .add:hover { background: var(--hover); }
+  .nav-heading .add {
+    margin-left: auto; background: none; border: 1px solid var(--line); color: var(--muted);
+    font-size: 14px; line-height: 1; width: 24px; height: 22px; padding: 0;
+  }
   .nav-item .extra { margin-left: auto; display: flex; align-items: center; gap: 6px; }
   .nav-item .count { color: var(--muted); font-size: 12px; }
   .nav-item .badge {
@@ -176,6 +192,47 @@
   .banner ol { margin: 6px 0 0; padding-left: 20px; }
   .banner p { margin: 0; }
   .status { color: var(--muted); font-size: 12px; min-height: 18px; margin-bottom: 4px; }
+  /* A search page's title row and the line saying what it matches. */
+  .list-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .list-head h1 { margin-bottom: 4px; }
+  .list-head .edit-search { margin-left: auto; }
+  .summary { color: var(--muted); font-size: 13px; margin: 0 0 14px 36px; }
+  /* Search builder */
+  .builder {
+    background: var(--sidebar); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 20px; margin-bottom: 18px; box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+  }
+  .builder h2 { font-size: 12px; color: var(--muted); font-weight: 600; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .builder .brow { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; margin-bottom: 12px; }
+  .builder .brow > .label { color: var(--muted); font-size: 13px; font-weight: 600; }
+  .builder .brow > select { justify-self: start; }
+  .builder .values { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .builder .field {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .builder .b-name { font-size: 16px; font-weight: 600; width: 100%; box-sizing: border-box; }
+  .builder .hint { color: var(--muted); font-size: 12px; }
+  .builder .choice {
+    background: none; border: 1px solid var(--line); color: var(--text); border-radius: 11px;
+    padding: 2px 10px; font-size: 12px;
+  }
+  .builder .choice.on { color: #fff; border-color: var(--accent); background: var(--accent); }
+  .builder .choice.P1.on { background: var(--p1); border-color: var(--p1); }
+  .builder .choice.P2.on { background: var(--p2); border-color: var(--p2); }
+  .builder .choice.P3.on { background: var(--p3); border-color: var(--p3); }
+  .builder .choice.P4.on { background: var(--p4); border-color: var(--p4); }
+  .builder .choice.P5.on { background: var(--p5); border-color: var(--p5); }
+  .builder .chip { background: var(--pill); border-radius: 10px; padding: 1px 4px 1px 9px; font-size: 12px; display: inline-flex; align-items: center; gap: 2px; }
+  .builder .chip.missing { color: var(--red); }
+  .builder .chip button { background: none; border: none; color: var(--muted); padding: 0 4px; font-size: 13px; }
+  .builder .all-of { color: var(--muted); font-size: 12px; margin: 2px 0 14px 108px; }
+  .builder .bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 14px; }
+  .builder .bar .delete { margin-left: auto; color: var(--red); border-color: var(--red); background: transparent; }
+  .builder .confirm { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .builder .b-message { color: var(--red); font-size: 12px; min-height: 0; margin-top: 8px; }
+  .builder-count { color: var(--muted); font-size: 13px; margin: 0 0 6px 10px; }
+  .task.inert { cursor: default; }
   /* Priority groups */
   section.group { margin-bottom: 26px; }
   section.group h2 {
@@ -354,18 +411,12 @@ const LISTS = [
   { id: "anytime", name: "Anytime", icon: "anytime", things: true },
   { id: "someday", name: "Someday", icon: "someday", things: true },
   { id: "logbook", name: "Logbook", icon: "logbook", things: true },
-  null, // Gap before the custom searches.
-  { id: "p1", name: "P1 · Due Today", icon: "search" },
-  { id: "p2", name: "P2 · To Do", icon: "search" },
-  { id: "p3", name: "P3 · Follow Up", icon: "search" },
-  { id: "p4", name: "P4 · Next Up", icon: "search" },
-  { id: "overdue", name: "Overdue", icon: "search" },
 ];
 const REFRESH_MS = 60000;
 
 const state = {
   list: "today",
-  view: "list",   // "list" or "setup"
+  view: "list",   // "list", "builder" (search builder), "settings" or "setup"
   busy: false,    // True while the editor's task is being loaded.
   pending: 0,     // Changes sent to Things and not yet confirmed (see enqueue).
   drag: null,     // { id, from } while a task is being dragged.
@@ -376,6 +427,9 @@ const state = {
   priorityNames: {}, // Name of each priority from Settings (priority pills); "" shows the tag.
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
   hideEmpty: loadSetting("hideEmpty", false), // "Hide Empty" sidebar option (Today's groups).
+  searches: [],   // The sidebar's saved searches ({id, name}), from the last list response.
+  searchesCollapsed: loadSetting("searchesCollapsed", false), // Searches section closed (▸).
+  builder: null,  // The open search builder (see openBuilder), or null.
   theme: loadSetting("theme", "dark"), // Appearance: "dark" (default) or "light".
   version: "",
 };
@@ -418,7 +472,11 @@ async function api(path, body) {
   };
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+  if (!response.ok) {
+    const error = new Error(data.error || `Request failed (${response.status})`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -441,32 +499,22 @@ function renderSidebar() {
   title.append(el("div", "name", "Do Things"), el("div", "tagline", "Turning Plans Into Action"));
   nav.append(title);
   for (const entry of LISTS) {
-    if (entry === null) {
-      nav.append(el("div", "nav-gap"), el("div", "nav-heading", "Searches"));
-      continue;
+    const selected = state.view === "list" && state.list === entry.id;
+    nav.append(navItem(entry, selected));
+  }
+  nav.append(el("div", "nav-gap"), searchesHeading());
+  if (!state.searchesCollapsed) {
+    // The search being edited stays highlighted while its builder is open.
+    const showing = state.view === "list" || (state.view === "builder" && !state.builder.isNew);
+    for (const search of state.searches) {
+      nav.append(navItem({ id: search.id, name: search.name, icon: "search" }, showing && state.list === search.id));
     }
-    const item = el("div", "nav-item" + (state.view === "list" && state.list === entry.id ? " selected" : ""));
-    item.innerHTML = ICONS[entry.icon]; // Static icon markup only.
-    item.append(el("span", "", entry.name));
-    const extra = el("span", "extra");
-    item.append(extra);
-    appendCounts(extra, entry.id);
-    if (entry.things) {
-      const mark = el("span", "opens-things");
-      mark.innerHTML = OPENS_IN_THINGS; // Static icon markup only.
-      extra.append(mark);
-      item.title = "Opens in Things";
-      item.onclick = () => showThingsList(entry.id);
-    } else {
-      // Switching lists closes an open editor without saving.
-      item.onclick = () => { state.list = entry.id; state.view = "list"; state.edit = null; setStatus(""); load(); };
-    }
-    nav.append(item);
   }
   // Hide Completed is applied by the server, so the list is reloaded;
   // Hide Empty only hides groups already drawn.
   nav.append(
-    sidebarOption("Hide Completed", "hideCompleted", load),
+    // Hide Completed also applies to the builder's results.
+    sidebarOption("Hide Completed", "hideCompleted", () => (state.builder ? refreshBuilder() : load())),
     sidebarOption("Hide Empty", "hideEmpty", applyHideEmpty),
   );
   const footer = el("div", "nav-footer");
@@ -482,6 +530,58 @@ function renderSidebar() {
   version.title = "Open the Do Things guide";
   footer.append(settings, version);
   nav.append(footer);
+}
+
+/** Build a sidebar entry: Today or a search (shown here), or one of Things' lists (opened in Things). */
+function navItem(entry, selected) {
+  const item = el("div", "nav-item" + (selected ? " selected" : ""));
+  item.innerHTML = ICONS[entry.icon]; // Static icon markup only.
+  item.append(el("span", "", entry.name));
+  const extra = el("span", "extra");
+  item.append(extra);
+  appendCounts(extra, entry.id);
+  if (entry.things) {
+    const mark = el("span", "opens-things");
+    mark.innerHTML = OPENS_IN_THINGS; // Static icon markup only.
+    extra.append(mark);
+    item.title = "Opens in Things";
+    item.onclick = () => showThingsList(entry.id);
+  } else {
+    // Switching lists closes an open editor or builder without saving.
+    item.onclick = () => { showList(entry.id); };
+  }
+  return item;
+}
+
+/** Show Today or a search, closing any open editor or builder without saving. */
+function showList(id) {
+  state.list = id;
+  state.view = "list";
+  state.edit = null;
+  state.builder = null;
+  setStatus("");
+  load();
+}
+
+/** Build the Searches heading: clicking the name collapses or expands the list (remembered); + starts a new search. */
+function searchesHeading() {
+  const heading = el("div", "nav-heading");
+  const toggle = el("button", "toggle");
+  toggle.type = "button";
+  toggle.setAttribute("aria-expanded", String(!state.searchesCollapsed));
+  toggle.append(el("span", "", state.searchesCollapsed ? "▸" : "▾"), el("span", "", "Searches"));
+  toggle.onclick = () => {
+    state.searchesCollapsed = !state.searchesCollapsed;
+    saveSetting("searchesCollapsed", state.searchesCollapsed);
+    renderSidebar();
+  };
+  const add = el("button", "add", "+");
+  add.type = "button";
+  add.title = "New search";
+  add.setAttribute("aria-label", "New search");
+  add.onclick = () => openBuilder(null);
+  heading.append(toggle, add);
+  return heading;
 }
 
 /**
@@ -526,12 +626,17 @@ function appendCounts(extra, id) {
 
 // --- Task lists --------------------------------------------------------------
 
-/** Build one task row. Open Today rows are draggable between and within groups. */
-function taskRow(task, priority) {
+/**
+ * Build one task row. Open Today rows are draggable between and within groups.
+ * An `inert` row (the search builder's results) is display only.
+ */
+function taskRow(task, priority, inert = false) {
   const row = el("div", "task" + (task.completed ? " done" : ""));
   row.dataset.id = task.id;
+  if (inert) row.classList.add("inert");
   const check = el("button", "check");
   check.type = "button";
+  check.disabled = inert;
   check.title = task.completed ? "Mark as not done" : "Mark as done";
   check.setAttribute("aria-label", check.title);
   check.innerHTML = TICK; // Static icon markup only.
@@ -567,6 +672,7 @@ function taskRow(task, priority) {
     flag.append(task.deadline_label);
     row.append(flag);
   }
+  if (inert) return row;
   row.onclick = () => startEdit(row, task.id);
   if (priority && !task.completed) {
     row.draggable = true;
@@ -593,10 +699,25 @@ function taskRow(task, priority) {
 
 /** Add the list title with its icon. */
 function renderHeader(content, entry) {
+  content.append(listHeading(entry.name, entry.icon));
+}
+
+/** Build a list's title with its icon. */
+function listHeading(name, icon) {
   const heading = el("h1");
-  heading.innerHTML = ICONS[entry.icon]; // Static icon markup only.
-  heading.append(entry.name);
-  content.append(heading);
+  heading.innerHTML = ICONS[icon]; // Static icon markup only.
+  heading.append(name);
+  return heading;
+}
+
+/** Add a search's title, its Edit search button and the line saying what it matches. */
+function renderSearchHeader(content, data) {
+  const head = el("div", "list-head");
+  const edit = el("button", "secondary edit-search", "Edit search");
+  edit.type = "button";
+  edit.onclick = () => openBuilder(data.search);
+  head.append(listHeading(data.search.name, "search"), edit);
+  content.append(head, el("p", "summary", data.summary));
 }
 
 /** Build a warning banner: an intro line and numbered steps. */
@@ -753,7 +874,8 @@ async function retryRefresh() {
 function renderList(data) {
   const content = document.getElementById("content");
   content.replaceChildren();
-  renderHeader(content, LISTS.find((l) => l && l.id === data.name));
+  if (data.search) renderSearchHeader(content, data);
+  else renderHeader(content, LISTS.find((l) => l.id === data.name));
   renderBanners(content, data);
   const status = el("div", "status", state.status);
   status.id = "status";
@@ -1503,6 +1625,293 @@ async function showThingsList(name) {
   }
 }
 
+// --- Search builder -----------------------------------------------------------
+
+// What a new search starts as: no criteria, so every Today task.
+const BLANK_SEARCH = { id: "", name: "", scope: "today", priorities: [], tags: [], text: "", lists: [], overdue: false };
+const BUILDER_TEXT_DELAY_MS = 300; // Typing pauses this long before the results update.
+
+/**
+ * Open the search builder for `search` (the search being shown), or for a new
+ * search when null. Changes stay in the builder until Save.
+ */
+function openBuilder(search) {
+  state.edit = null;
+  state.view = "builder";
+  const draft = JSON.parse(JSON.stringify(search || BLANK_SEARCH));
+  state.builder = { draft, isNew: !search, choices: null, preview: null, confirmDelete: false, message: "", seq: 0, timer: null };
+  renderSidebar();
+  const content = document.getElementById("content");
+  content.replaceChildren(listHeading(search ? search.name : "New search", "search"), el("div", "empty", "Loading…"));
+  refreshBuilder();
+}
+
+/** Ask the server which tasks the draft search lists (read only), then draw the results. */
+async function refreshBuilder() {
+  const builder = state.builder;
+  if (!builder) return;
+  clearTimeout(builder.timer);
+  const seq = ++builder.seq; // Only the latest answer is drawn.
+  try {
+    const preview = await api("/api/searches/preview", { search: builder.draft, hide_completed: state.hideCompleted });
+    if (state.builder !== builder || seq !== builder.seq) return;
+    builder.preview = preview;
+    if (!builder.choices) {
+      builder.choices = preview.choices;
+      renderBuilder();
+    } else {
+      renderBuilderResults();
+    }
+  } catch (error) {
+    if (state.builder !== builder) return;
+    if (error.status === 404) { showList("today"); return; } // Deleted meanwhile.
+    builder.message = error.message;
+    if (builder.choices) renderBuilderMessage(); else renderBuilder();
+  }
+}
+
+/** Update the results after typing stops for a moment. */
+function refreshBuilderSoon() {
+  clearTimeout(state.builder.timer);
+  state.builder.timer = setTimeout(refreshBuilder, BUILDER_TEXT_DELAY_MS);
+}
+
+/** Change the draft and redraw the form, then update the results. */
+function changeDraft(update) {
+  update(state.builder.draft);
+  state.builder.message = "";
+  renderBuilder();
+  refreshBuilder();
+}
+
+/** Draw the builder page: title, the form and the results. */
+function renderBuilder() {
+  const builder = state.builder;
+  const content = document.getElementById("content");
+  const title = builder.isNew ? "New search" : builder.draft.name || "Search";
+  content.replaceChildren(listHeading(title, "search"));
+  if (!builder.choices) {
+    content.append(el("div", "banner", builder.message));
+    return;
+  }
+  content.append(builderForm(), el("div", "builder-count"));
+  const zone = el("div", "drop-zone builder-results");
+  content.append(zone);
+  renderBuilderResults();
+}
+
+/** Build the builder's form from the draft. */
+function builderForm() {
+  const builder = state.builder;
+  const draft = builder.draft;
+  const form = el("form", "builder");
+  form.setAttribute("aria-label", builder.isNew ? "New search" : "Edit search");
+  form.onsubmit = (event) => { event.preventDefault(); saveSearch(); };
+  form.append(el("h2", "", builder.isNew ? "New search" : "Edit search"));
+
+  const name = el("input", "field b-name");
+  name.value = draft.name;
+  name.placeholder = "Name";
+  name.maxLength = 60;
+  name.setAttribute("aria-label", "Name");
+  name.oninput = () => { draft.name = name.value; };
+  form.append(builderRow("Name", name));
+
+  const scope = el("div", "values");
+  for (const [value, label] of [["today", "Today"], ["all", "All open tasks"]]) {
+    scope.append(choiceButton(label, draft.scope === value, "", () => changeDraft((d) => { d.scope = value; })));
+  }
+  form.append(builderRow("Covers", scope));
+
+  const priorities = el("div", "values");
+  for (const p of state.priorities) {
+    const label = state.priorityNames[p] ? `${p} · ${state.priorityNames[p]}` : p;
+    priorities.append(choiceButton(label, draft.priorities.includes(p), p, () => changeDraft((d) => {
+      d.priorities = d.priorities.includes(p) ? d.priorities.filter((x) => x !== p) : state.priorities.filter((x) => x === p || d.priorities.includes(x));
+    })));
+  }
+  priorities.append(el("span", "hint", "None chosen = any priority"));
+  form.append(builderRow("Priority", priorities));
+
+  const tagNames = new Map(builder.choices.tags.map((t) => [t, t]));
+  form.append(builderRow("Tag", pickedValues("tags", tagNames, builder.choices.tags.map((t) => [t, t]), "Add tag…")));
+
+  const text = el("input", "field");
+  text.value = draft.text;
+  text.placeholder = "Any text";
+  text.maxLength = 100;
+  text.setAttribute("aria-label", "Text");
+  text.oninput = () => { draft.text = text.value; refreshBuilderSoon(); };
+  const textRow = el("div", "values");
+  textRow.append(text, el("span", "hint", "In the title or notes"));
+  form.append(builderRow("Text", textRow));
+
+  const lists = builder.choices.lists;
+  const listNames = new Map(lists.map((l) => [l.id, l.title]));
+  const groups = [["Areas", lists.filter((l) => l.kind === "area")], ["Projects", lists.filter((l) => l.kind === "project")]];
+  form.append(builderRow("Project", pickedValues("lists", listNames, groups, "Add project or area…")));
+
+  const deadline = el("select", "field");
+  deadline.setAttribute("aria-label", "Deadline");
+  for (const [value, label] of [["any", "Any"], ["overdue", "Overdue"]]) {
+    const option = el("option", "", label);
+    option.value = value;
+    option.selected = (value === "overdue") === draft.overdue;
+    deadline.append(option);
+  }
+  deadline.onchange = () => changeDraft((d) => { d.overdue = deadline.value === "overdue"; });
+  form.append(builderRow("Deadline", deadline));
+
+  form.append(el("p", "all-of", "Lists tasks that match all of these."));
+  form.append(builder.confirmDelete ? deleteConfirm() : builderButtons());
+  form.append(el("div", "b-message", builder.message));
+  return form;
+}
+
+/** Build one labeled row of the builder. */
+function builderRow(label, control) {
+  const row = el("div", "brow");
+  row.append(el("span", "label", label), control);
+  return row;
+}
+
+/** Build a toggle button; `kind` (a priority) colors it when on. */
+function choiceButton(label, on, kind, onClick) {
+  const button = el("button", `choice ${kind}${on ? " on" : ""}`, label);
+  button.type = "button";
+  button.setAttribute("aria-pressed", String(on));
+  button.onclick = onClick;
+  return button;
+}
+
+/**
+ * Build the chosen values of the draft's `key` ("tags" or "lists") as removable
+ * chips, plus a menu to add another. `names` maps values to their names in
+ * Things; a value not in it is no longer in Things. `options` are [value, name]
+ * pairs, or [group label, [{id, title}]] groups.
+ */
+function pickedValues(key, names, options, prompt) {
+  const draft = state.builder.draft;
+  const values = el("div", "values");
+  for (const value of draft[key]) {
+    const found = names.has(value);
+    const chip = el("span", "chip" + (found ? "" : " missing"), found ? names.get(value) : `${key === "tags" ? value : "Project"} · Not found in Things`);
+    const remove = el("button", "", "×");
+    remove.type = "button";
+    remove.setAttribute("aria-label", `Remove ${found ? names.get(value) : value}`);
+    remove.onclick = () => changeDraft((d) => { d[key] = d[key].filter((v) => v !== value); });
+    chip.append(remove);
+    values.append(chip);
+  }
+  const add = el("select", "field");
+  add.setAttribute("aria-label", prompt);
+  add.append(el("option", "", prompt));
+  const addOption = (parent, value, label) => {
+    if (draft[key].includes(value)) return;
+    const option = el("option", "", label);
+    option.value = value;
+    parent.append(option);
+  };
+  for (const entry of options) {
+    if (Array.isArray(entry[1])) {
+      const group = el("optgroup");
+      group.label = entry[0];
+      for (const item of entry[1]) addOption(group, item.id, item.title);
+      if (group.children.length) add.append(group);
+    } else {
+      addOption(add, entry[0], entry[1]);
+    }
+  }
+  add.onchange = () => {
+    const value = add.value;
+    if (add.selectedIndex > 0) changeDraft((d) => { d[key] = d[key].concat([value]); });
+  };
+  if (add.options.length > 1) values.append(add);
+  if (!draft[key].length) values.append(el("span", "hint", key === "tags" ? "Any tag" : "Any project or area"));
+  return values;
+}
+
+/** Build Save, Cancel and (for a saved search) Delete search. */
+function builderButtons() {
+  const bar = el("div", "bar");
+  const save = el("button", "", "Save");
+  save.type = "submit";
+  const cancel = el("button", "secondary", "Cancel");
+  cancel.type = "button";
+  cancel.onclick = () => showList(state.list);
+  bar.append(save, cancel);
+  if (!state.builder.isNew) {
+    const remove = el("button", "delete", "Delete search");
+    remove.type = "button";
+    remove.onclick = () => { state.builder.confirmDelete = true; renderBuilder(); };
+    bar.append(remove);
+  }
+  return bar;
+}
+
+/** Build the confirmation shown in place of the buttons after Delete search. */
+function deleteConfirm() {
+  const bar = el("div", "bar confirm");
+  const name = state.searches.find((s) => s.id === state.builder.draft.id);
+  bar.append(el("span", "", `Delete the search “${name ? name.name : state.builder.draft.name}”? Your tasks aren’t changed.`));
+  const remove = el("button", "danger", "Delete");
+  remove.type = "button";
+  remove.onclick = deleteSearch;
+  const cancel = el("button", "secondary", "Cancel");
+  cancel.type = "button";
+  cancel.onclick = () => { state.builder.confirmDelete = false; renderBuilder(); };
+  bar.append(remove, cancel);
+  return bar;
+}
+
+/** Draw the preview's results under the form: the count, the summary and the rows. */
+function renderBuilderResults() {
+  const preview = state.builder.preview;
+  const count = document.querySelector(".builder-count");
+  const zone = document.querySelector(".builder-results");
+  if (!preview || !count || !zone) return;
+  const open = preview.tasks.filter((t) => !t.completed).length;
+  count.textContent = `${open} ${open === 1 ? "task matches" : "tasks match"} · ${preview.summary}`;
+  zone.replaceChildren();
+  if (!preview.tasks.length) zone.append(el("div", "empty", "Nothing matches."));
+  for (const task of preview.tasks) zone.append(taskRow(task, null, true));
+}
+
+/** Show the builder's message (a refused save or a failed preview) without redrawing the form. */
+function renderBuilderMessage() {
+  const message = document.querySelector(".builder .b-message");
+  if (message) message.textContent = state.builder.message;
+}
+
+/** Save the draft (a new search or changes), then show the saved search. */
+async function saveSearch() {
+  const builder = state.builder;
+  try {
+    const saved = await api("/api/searches/save", { search: builder.draft });
+    state.searches = saved.searches;
+    showList(saved.search.id);
+  } catch (error) {
+    if (state.builder !== builder) return;
+    builder.message = error.message;
+    renderBuilderMessage();
+  }
+}
+
+/** Delete the search after the user confirmed, then show Today. */
+async function deleteSearch() {
+  const builder = state.builder;
+  try {
+    const result = await api("/api/searches/delete", { id: builder.draft.id });
+    state.searches = result.searches;
+    showList("today");
+  } catch (error) {
+    if (state.builder !== builder) return;
+    builder.message = error.message;
+    builder.confirmDelete = false;
+    renderBuilder();
+  }
+}
+
 // --- Settings -----------------------------------------------------------------
 
 /** Apply an appearance ("dark" or "light") to the page. */
@@ -1517,7 +1926,8 @@ function applyTheme(theme) {
  */
 async function showSettings(scrollTo) {
   state.view = "settings";
-  state.edit = null; // Opening Settings closes an open editor without saving.
+  state.edit = null; // Opening Settings closes an open editor or builder without saving.
+  state.builder = null;
   renderSidebar();
   let data = null;
   let failure = "";
@@ -1924,9 +2334,14 @@ async function load() {
     state.counts = data.counts;
     state.priorities = data.priorities;
     state.priorityNames = data.priority_names;
-    renderSidebar(); // Again, now with the fresh counts.
+    state.searches = data.searches;
+    renderSidebar(); // Again, now with the fresh counts and searches.
     renderList(data);
   } catch (error) {
+    if (error.status === 404 && state.list !== "today") {
+      showList("today"); // The search was deleted (e.g. in another window).
+      return;
+    }
     const content = document.getElementById("content");
     content.replaceChildren(el("div", "banner", error.message));
   }

@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): place_in_list tests replaced by place_in_today (search
+  membership is tested in test_search_check.py).
 - v1.8.0 (2026-11-10): Tests for the calendar settings (calendar_events,
   hidden_calendars).
 - v1.7.1 (2026-11-10): Synchronized module version metadata.
@@ -44,7 +46,7 @@ from priority_check import (
     in_project_order,
     in_today,
     parse_settings,
-    place_in_list,
+    place_in_today,
     plan_completion,
     plan_edit,
     plan_move,
@@ -319,8 +321,8 @@ class AutoP1OffTests(unittest.TestCase):
         change = plan_edit(task, TaskEdit(deadline=YESTERDAY), TODAY, self.OFF)
         after = predict(task, change, TODAY, self.OFF)
         self.assertEqual((after.deadline, current_priority(after.tags)), (YESTERDAY, "P2"))
-        self.assertEqual(place_in_list(after, "today", TODAY, self.OFF), "P2")
-        self.assertEqual(place_in_list(after, "today", TODAY), "P1")  # With it on, the same task is P1.
+        self.assertEqual(place_in_today(after, TODAY, self.OFF), "P2")
+        self.assertEqual(place_in_today(after, TODAY), "P1")  # With it on, the same task is P1.
 
 
 class DefaultPriorityTests(unittest.TestCase):
@@ -381,11 +383,8 @@ class P4Tests(unittest.TestCase):
         change = plan_move(make_task(tags=["P4"], start_date=TODAY), "P1", TODAY)
         self.assertEqual((change.tags, change.set_deadline), (["P1"], TODAY))
 
-    def test_p4_search(self) -> None:
-        task = make_task(tags=["P4"], start_date=TODAY)
-        self.assertEqual(place_in_list(task, "p4", TODAY), "list")
-        self.assertIsNone(place_in_list(task, "p3", TODAY))
-        self.assertEqual(place_in_list(task, "today", TODAY), "P4")
+    def test_p4_group(self) -> None:
+        self.assertEqual(place_in_today(make_task(tags=["P4"], start_date=TODAY), TODAY), "P4")
 
     def test_undo_removes_p4(self) -> None:
         reopened = in_project("first", "N", (0, 0, 9), start_date=TODAY)
@@ -740,18 +739,10 @@ class PredictTests(unittest.TestCase):
         after = predict(make_task(tags=["P2"]), Change("A1", None, set_deadline=TODAY), TODAY)
         self.assertEqual((after.start_date, after.tags), (TODAY, ["P1"]))
 
-    def test_place_in_list(self) -> None:
-        p2 = make_task(tags=["P2"], start_date=TODAY)
-        self.assertEqual(place_in_list(p2, "today", TODAY), "P2")
-        self.assertEqual(place_in_list(p2, "p2", TODAY), "list")
-        self.assertIsNone(place_in_list(p2, "p1", TODAY))
-        self.assertIsNone(place_in_list(p2, "overdue", TODAY))
-        later = make_task(tags=["P1"], start_date=TOMORROW)
-        self.assertIsNone(place_in_list(later, "today", TODAY))
-        self.assertIsNone(place_in_list(later, "p1", TODAY))
-        self.assertEqual(place_in_list(make_task(tags=["P1"], deadline=YESTERDAY), "overdue", TODAY), "list")
-        with self.assertRaises(ValueError):
-            place_in_list(p2, "inbox", TODAY)
+    def test_place_in_today(self) -> None:
+        self.assertEqual(place_in_today(make_task(tags=["P2"], start_date=TODAY), TODAY), "P2")
+        self.assertEqual(place_in_today(make_task(tags=["P2"], deadline=YESTERDAY), TODAY), "P1")
+        self.assertIsNone(place_in_today(make_task(tags=["P1"], start_date=TOMORROW), TODAY))
 
     def test_prune_order(self) -> None:
         order = {"P1": ["a", "gone"], "P3": ["b"]}

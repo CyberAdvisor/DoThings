@@ -3,9 +3,11 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Tests for the searches file and the list of every open
+  task; the fixed P and Overdue search queries are gone.
 - v1.8.0 (2026-11-10): Tests for the calendar scripts (run_jxa, the read
   script never asking for access, read_calendar) and the Calendar event URL;
   open_things_url is now open_url.
@@ -69,6 +71,7 @@ from common import (
     is_valid_task_id,
     load_order,
     load_pulls,
+    load_searches,
     load_settings,
     load_token,
     missing_priority_tags,
@@ -87,6 +90,7 @@ from common import (
     run_trash_script,
     save_order,
     save_pulls,
+    save_searches,
     save_settings,
     save_token,
     start_of_day,
@@ -96,6 +100,7 @@ from common import (
     validate_token,
 )
 from priority_check import DEFAULT_SETTINGS, Change, Settings
+from search_check import DEFAULT_SEARCHES, Search
 
 TODAY = date(2026, 11, 7)
 
@@ -422,6 +427,26 @@ class SettingsFileTests(unittest.TestCase):
                     self.assertEqual(load_settings(path), DEFAULT_SETTINGS)
 
 
+class SearchesFileTests(unittest.TestCase):
+    """The saved-searches file."""
+
+    def test_round_trip_and_bad_files(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "searches.json")
+            self.assertEqual(load_searches(path), DEFAULT_SEARCHES)  # No file yet.
+            searches = (Search("s1", "Calls", tags=("Calls",)),)
+            save_searches(searches, path)
+            self.assertEqual(load_searches(path), searches)
+            save_searches((), path)
+            self.assertEqual(load_searches(path), ())  # Deleting every search is kept.
+            for content in ("{not json", '{"searches": [{"id": "s1"}]}'):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+                # Logged and ignored: the sidebar falls back to the defaults.
+                with self.subTest(content=content), self.assertLogs("dothings", level="ERROR"):
+                    self.assertEqual(load_searches(path), DEFAULT_SEARCHES)
+
+
 class PullsFileTests(unittest.TestCase):
     """The record of tasks Do Things started in sequential projects."""
 
@@ -534,7 +559,7 @@ class DatabaseTests(unittest.TestCase):
                 [(uuid, uuid, status, started, started, stop) for uuid, status, stop in rows],
             )
             conn.executemany("INSERT INTO TMTaskTag VALUES (?, 't1')", [(r[0],) for r in rows])
-        for name in ("today", "p1"):
+        for name in ("today", "open"):
             with self.subTest(name=name):
                 ids = self._ids(name)
                 self.assertIn("done_today", ids)
@@ -554,30 +579,20 @@ class DatabaseTests(unittest.TestCase):
             conn.execute("UPDATE TMTask SET deadlineSuppressionDate = 1 WHERE uuid = 'overdue'")
         self.assertIn("overdue", self._ids("today"))
 
-    def test_custom_searches(self) -> None:
-        # P searches list only tasks in Today: tagged tasks starting later, or
-        # with no start date and no due date, are left out until they start.
-        with write_db(self.path) as conn:
-            conn.execute("INSERT INTO TMTaskTag VALUES ('future', 't1')")
-            conn.execute("INSERT INTO TMTaskTag VALUES ('today2', 't2')")
-        self.assertEqual(self._ids("p1"), ["today1"])
-        self.assertEqual(self._ids("p2"), ["today2"])
-        self.assertEqual(self._ids("p4"), [])
-        with write_db(self.path) as conn:
-            conn.execute("INSERT INTO TMTag VALUES ('t4', 'P4')")
-            conn.execute("INSERT INTO TMTaskTag VALUES ('today2', 't4')")
-            conn.execute("INSERT INTO TMTaskTag VALUES ('anytime', 't4')")  # Not in Today.
-        self.assertEqual(self._ids("p4"), ["today2"])
-        self.assertEqual(self._ids("overdue"), ["overdue"])
+    def test_open_list_reads_every_open_todo(self) -> None:
+        # Searches covering all open tasks filter this list; Today's searches filter Today.
+        self.assertEqual(
+            set(self._ids("open")), {"today1", "today2", "overdue", "future", "someday", "inbox", "anytime"}
+        )
 
     def test_todos_under_closed_or_trashed_parents_hidden(self) -> None:
-        # Today and P1 are checked against the expected lists in the tests
+        # Today and the open list are checked against the expected lists in the tests
         # above; this names the hidden to-dos explicitly.
         hidden = {
             "in_trashproj", "in_doneproj", "in_cancelproj",
             "in_trashhead", "in_donehead", "in_headintrash", "done_in_trashproj",
         }
-        for name in ("today", "p1", "overdue"):
+        for name in ("today", "open"):
             with self.subTest(name=name):
                 self.assertFalse(hidden & set(self._ids(name)))
 

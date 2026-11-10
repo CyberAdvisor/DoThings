@@ -3,9 +3,10 @@
 The calendar script is replaced with mocks, so these run anywhere; the
 JavaScript for Automation itself can only run on a Mac.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Synchronized module version metadata.
 - v1.8.0 (2026-11-10): Report built from calendar_check (Today's order and
   labels); the osascript tests moved to test_common.py with run_jxa; the
   AppleScript comparison is gone.

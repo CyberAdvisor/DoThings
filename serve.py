@@ -4,14 +4,21 @@ Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves, reorders, edits, completes
 and reopens tasks, moves tasks to Things' Trash, resets a sequential project to one task in Today, opens
 tasks and Things' own lists in Things, reads and saves the user's settings,
-shows today's calendar events (read only) and opens them in Calendar, and
-stores the Things auth token on first run.
+shows today's calendar events (read only) and opens them in Calendar, lists,
+previews, saves and deletes the user's saved searches, and stores the Things
+auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.8.0
+Version: 1.9.0
 
 Change log:
+- v1.9.0 (2026-11-10): Saved searches: /api/list takes "today" or a search id
+  and every list response carries the sidebar's searches; a search's response
+  carries its definition and summary; POST /api/searches/preview (read only),
+  /api/searches/save and /api/searches/delete. Rows show priority pills in any
+  search that can list more than one priority (PRIORITY_PILL_LISTS removed);
+  the edit preview places a row in the search being shown.
 - v1.8.0 (2026-11-10): Today's list response carries today's calendar events
   (when turned on in Settings) and the calendar access state; the settings
   response carries the calendars; POST /api/calendar/access asks macOS for
@@ -59,7 +66,6 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from common import (
-    APP_LISTS,
     INDEX_HTML_PATH,
     PROJECT_VERSION,
     Pull,
@@ -89,9 +95,11 @@ from common import (
     read_list,
     read_sequential_projects,
     read_task,
+    load_searches,
     load_settings,
     save_order,
     save_pulls,
+    save_searches,
     save_settings,
     save_token,
     start_of_day,
@@ -126,7 +134,7 @@ from priority_check import (
     plan_sequence,
     plan_sequence_reset,
     plan_sequence_undo,
-    place_in_list,
+    place_in_today,
     predict,
     prune_order,
     required_priority,
@@ -134,6 +142,19 @@ from priority_check import (
     sequence_priority,
     today_counts,
     update_order,
+)
+from search_check import (
+    SCOPE_TODAY,
+    Search,
+    describe,
+    find_search,
+    matches,
+    new_search_id,
+    parse_search,
+    search_results,
+    shows_priority_pills,
+    with_search,
+    without_search,
 )
 
 PAGE_URL = f"http://{SERVER_HOST}:{SERVER_PORT}/"
@@ -145,8 +166,6 @@ REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TITLE_CHARS = 1000
 MAX_NOTES_CHARS = 20000
-# Lists whose rows show their priority as a pill; elsewhere the list itself shows it.
-PRIORITY_PILL_LISTS = ("overdue",)
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
 
@@ -179,7 +198,7 @@ def task_to_json(
     `tags` never holds the P tags. With `priority_pill` (lists that mix
     priorities) `priority` is the task's P tag, which the page shows as a
     colored pill with the priority's name; elsewhere it is None, since
-    Today's groups and the P searches already show the priority.
+    Today's groups and searches of one priority already show the priority.
     `sequence` ("task 2 of 5") marks a task a sequential project started; the
     page shows it after the project name.
     """
@@ -409,13 +428,46 @@ def read_today(conn: sqlite3.Connection, today: date) -> List[Task]:
     return in_project_order(read_list(conn, "today", today))
 
 
+def sidebar_searches(searches: Tuple[Search, ...]) -> List[Dict[str, str]]:
+    """Return the searches as the sidebar lists them: id and name, in saved order."""
+    return [{"id": s.id, "name": s.name} for s in searches]
+
+
+def search_list_titles(conn: sqlite3.Connection) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """Return the builder's choices (tags, and projects and areas) and the project and area titles by id."""
+    options = read_edit_options(conn)
+    lists = [{"id": a["id"], "title": a["title"], "kind": "area"} for a in options["areas"]] + [
+        {"id": p["id"], "title": p["title"], "kind": "project"} for p in options["projects"]
+    ]
+    return {"tags": options["tags"], "lists": lists}, {item["id"]: item["title"] for item in lists}
+
+
+def search_tasks(conn: sqlite3.Connection, search: Search, today: date, today_tasks: List[Task]) -> List[Task]:
+    """Return the tasks `search` lists. A Today search filters Today as Do Things shows it (project order)."""
+    candidates = today_tasks if search.scope == SCOPE_TODAY else read_list(conn, "open", today)
+    return search_results(candidates, search, today)
+
+
+def search_rows(
+    tasks: List[Task], search: Search, today: date, labels: Dict[str, str], hide_completed: bool
+) -> List[Dict[str, Any]]:
+    """Return a search's rows, completed tasks last (or left out with `hide_completed`)."""
+    if hide_completed:
+        tasks = [t for t in tasks if not t.completed]
+    pills = shows_priority_pills(search)
+    return [task_to_json(t, today, priority_pill=pills, sequence=labels.get(t.uuid)) for t in completed_last(tasks)]
+
+
 def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
-    """Build the JSON for Today or a search, applying the refresh rules first.
+    """Build the JSON for Today or a saved search (`name` is "today" or a search id), applying the refresh rules first.
 
     With `hide_completed`, tasks completed today are left out. Every response
-    also carries the sidebar counts, so they stay current.
+    also carries the sidebar counts and searches, so they stay current; a
+    search's response also carries the search and its summary line.
     """
-    if name not in APP_LISTS:
+    searches = load_searches()
+    search = None if name == "today" else find_search(searches, name)
+    if name != "today" and search is None:
         raise ApiError(404, f"Unknown list: {name}")
     db_path = require_db_path()
     token = load_token()
@@ -429,15 +481,15 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         get_logger().error("Automatic updates paused until Retry: Things didn't confirm a change.")
     with open_things_db(db_path) as conn:
         today_tasks = read_today(conn, today)
-        tasks = today_tasks if name == "today" else read_list(conn, name, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
         labels = sequence_labels(conn, settings)
+        if search is not None:
+            tasks = search_tasks(conn, search, today, today_tasks)
+            _, titles = search_list_titles(conn)
     order = load_order()
     kept = prune_order(order, [t.uuid for t in today_tasks])  # Forget tasks that left Today.
     if kept != {p: order.get(p, []) for p in PRIORITIES}:
         save_order(kept)
-    if hide_completed:
-        tasks = [t for t in tasks if not t.completed]
     response: Dict[str, Any] = {
         "name": name,
         "token_set": token is not None,
@@ -448,8 +500,10 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "priorities": list(PRIORITIES),
         "priority_names": settings.names,
         "counts": counts,
+        "searches": sidebar_searches(searches),
     }
-    if name == "today":
+    if search is None:
+        tasks = [t for t in today_tasks if not (hide_completed and t.completed)]
         response["calendar"] = calendar_json(settings, today)
         groups = group_today(tasks, kept, today, settings)
         response["groups"] = [
@@ -461,13 +515,72 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
             for p in PRIORITIES
         ]
     else:
-        # Only Overdue mixes priorities, so only it shows priority pills.
-        pills = name in PRIORITY_PILL_LISTS
-        response["tasks"] = [
-            task_to_json(t, today, priority_pill=pills, sequence=labels.get(t.uuid))
-            for t in completed_last(tasks)
-        ]
+        response["search"] = search.to_json()
+        response["summary"] = describe(search, titles)
+        response["tasks"] = search_rows(tasks, search, today, labels, hide_completed)
     return response
+
+
+def parse_search_body(body: Dict[str, Any], searches: Tuple[Search, ...]) -> Search:
+    """Validate the builder's search; an empty id means a new search, which gets the next free id."""
+    raw = body.get("search")
+    search_id = raw.get("id") if isinstance(raw, dict) else None
+    if not search_id:
+        search_id = new_search_id(searches)
+    elif find_search(searches, search_id) is None:
+        raise ApiError(404, "That search no longer exists.")
+    try:
+        return parse_search(raw, search_id)
+    except ValueError as error:
+        raise ApiError(400, str(error))
+
+
+def preview_search(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Show what a search in the builder lists, without saving or writing anything.
+
+    Returns its rows and summary line, and the builder's choices (tags, and
+    projects and areas from Things). The refresh rules are not run, so the
+    preview never writes; the name isn't required yet.
+    """
+    raw = body.get("search")
+    if isinstance(raw, dict) and not str(raw.get("name") or "").strip():
+        raw = dict(raw, name="New search")  # The name is checked on Save, not while choosing.
+    search = parse_search_body({"search": raw}, load_searches())
+    today = today_local()
+    settings = load_settings()
+    with open_things_db(require_db_path()) as conn:
+        today_tasks = read_today(conn, today)
+        tasks = search_tasks(conn, search, today, today_tasks)
+        labels = sequence_labels(conn, settings)
+        choices, titles = search_list_titles(conn)
+    return {
+        "summary": describe(search, titles),
+        "tasks": search_rows(tasks, search, today, labels, body.get("hide_completed") is True),
+        "choices": choices,
+    }
+
+
+def save_search(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Add a new search or update one, and return it with the sidebar's searches."""
+    searches = load_searches()
+    search = parse_search_body(body, searches)
+    try:
+        searches = with_search(searches, search)
+    except ValueError as error:
+        raise ApiError(400, str(error))
+    save_searches(searches)
+    return {"search": search.to_json(), "searches": sidebar_searches(searches)}
+
+
+def delete_search(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete the search the user confirmed, and return the sidebar's searches. Tasks aren't touched."""
+    searches = load_searches()
+    search_id = body.get("id")
+    if find_search(searches, search_id) is None:
+        raise ApiError(404, "That search no longer exists.")
+    searches = without_search(searches, search_id)
+    save_searches(searches)
+    return {"searches": sidebar_searches(searches)}
 
 
 def parse_order(body: Dict[str, Any]) -> Tuple[str, List[str]]:
@@ -683,7 +796,8 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
     instead of working out the rules itself.
     """
     name = body.get("list")
-    if name not in APP_LISTS:
+    search = None if name == "today" else find_search(load_searches(), name)
+    if name != "today" and search is None:
         raise ApiError(400, "Unknown list.")
     task, db_path, _ = load_task(body.get("id"))
     today = today_local()
@@ -703,12 +817,16 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
         # Still the started task of its sequential project (changing its date ends that).
         with open_things_db(db_path) as conn:
             sequence = sequence_labels(conn, settings).get(task.uuid)
+    if search is None:
+        pills, place = False, place_in_today(after, today, settings)
+    else:
+        pills, place = shows_priority_pills(search), "list" if matches(after, search, today) else None
     return {
         "when": when_json(after, today),
         "deadline": after.deadline.isoformat() if after.deadline else None,
         "priority": required_priority(after, today, settings),
-        "row": task_to_json(after, today, priority_pill=name in PRIORITY_PILL_LISTS, sequence=sequence),
-        "place": place_in_list(after, name, today, settings),
+        "row": task_to_json(after, today, priority_pill=pills, sequence=sequence),
+        "place": place,
     }
 
 
@@ -900,6 +1018,9 @@ POST_ROUTES = {
     "/api/open": open_task,
     "/api/show-list": show_list,
     "/api/settings": update_settings,
+    "/api/searches/preview": preview_search,
+    "/api/searches/save": save_search,
+    "/api/searches/delete": delete_search,
     "/api/calendar/access": request_calendar_access,
     "/api/calendar/open": open_event,
     "/api/token": set_token,

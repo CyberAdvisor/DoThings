@@ -35,12 +35,12 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
   - **A deadline after today** is always kept.
   - With **Auto assign due and overdue tasks P1** off, moves never change the deadline.
 - **Sequential projects.** In **Settings › Sequential projects**, list the project tags you use in Things, each with a priority (for example `Sequential` → P2 for work in order, and `Next Up` → P4 for lower-priority projects you want to be reminded of, such as books to read, shows to watch or chores to do). Tag a Things project with one of them and Do Things brings its tasks into Today one at a time, in project order. When you check one off, the next one starts. Each such task shows its place, for example "Vacation · task 2 of 5". If you uncheck a task, the task it started goes back. The project's tasks in Today without a P tag, including ones you dated yourself, get the priority set beside the tag. A project with two listed tags uses the higher priority; Do Things never changes a project's tags. The list starts empty.
-- **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline, each with its priority as a colored pill. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
+- **Saved searches.** Build your own searches in the sidebar from priority, tag, text (in the title or notes), project or area, and an overdue deadline. A search covers Today or all open tasks, and lists the tasks that match every criterion you set; within one criterion, any of the values you choose matches (for example tags Calls or Errand). You start with P1, P2, P3, P4 and Overdue, which you can change or delete like any other. The **Searches** heading collapses the list (▾/▸), and **+** starts a new one. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
 - **Reset a sequential project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
 - **Calendar events in Today.** Turn on **Settings › Calendar events** and today's events from macOS Calendar appear above the priority groups, as in Things: all-day events first, then by time, each in its calendar's color. Ended events are dimmed, the current one's time is red, and clicking one opens it in Calendar. Choose which calendars to show. Do Things only reads your calendars.
 - **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Move to Trash** in the same card moves an open task to Things' Trash after you confirm it (put it back from the Trash in Things if needed). **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
-- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a list mixes priorities (Overdue), each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
+- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a search can list more than one priority, each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
 - **Things' other lists one click away.** Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open in Things. The sidebar shows the Inbox count and Today's due and open counts, as in Things.
 
 ## Advantages over Things
@@ -49,7 +49,7 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 | **Priorities** | No priority field. Today is one list. | Four priority groups. Drag between them, and tags and deadlines follow the rules above. |
 | **Moving tasks** | Moving a task in Today changes only its position. | Moving a task to another group changes its priority and, where the rules say so, its deadline and start date. |
 | **Sequential projects** | Every task in a project is available at once, and a someday list is easy to forget while a reminder for every item clutters Today. | A project with a tag you list in Settings releases one task at a time into Today, in order, at the priority you chose for that tag, and shows each task's place in the project. A low priority (such as P4) keeps just the next item of a someday list below the day's real work. |
-| **Saved searches** | Quick Find and tag filters, but no saved searches in the sidebar. | P1, P2, P3, P4 and Overdue are always one click away. |
+| **Saved searches** | Quick Find and tag filters, but no saved searches in the sidebar. | Your own searches by priority, tag, text, project and deadline, one click away. |
 | **Due tasks** | A due task can be removed from Today and stays out of view. | Anything due today or overdue is always in Today, in P1. |
 | **Project order in Today** | Today has its own order, separate from each project's order. | Tasks from the same project keep their project order within a priority. |
 
@@ -72,7 +72,7 @@ The commands in this guide assume that location. If you put it elsewhere, change
 **Updating to a new version:**
 1. Stop Do Things (see section 7).
 2. Download and unzip the new release.
-3. Copy these files from your old `DoThings` folder into the new one: `auth_token.txt`, `task_order.json`, `sequence_pulls.json` and `settings.json`. These are your token, your saved order, your sequential-project progress and your settings.
+3. Copy these files from your old `DoThings` folder into the new one: `auth_token.txt`, `task_order.json`, `sequence_pulls.json`, `settings.json` and `searches.json`. These are your token, your saved order, your sequential-project progress, your settings and your saved searches (any that don't exist yet are created when needed).
 4. Replace the old folder with the new one.
 
 ## 3. Prepare Things and your Mac
@@ -121,6 +121,14 @@ The commands in this guide assume that location. If you put it elsewhere, change
 - If access is off, Settings and Today say how to turn it on (System Settings › Privacy & Security › Calendars).
 
 Settings are saved as you change them, in `settings.json` in the Do Things folder.
+
+**Searches** in the sidebar are yours to build:
+- Click **+** next to the Searches heading for a new search, or open a search and click **Edit search**. The builder shows the tasks the search lists as you choose.
+- **Covers:** Today, or all open tasks. **Priority:** any of the ones you pick (none = any priority). **Tag**, **Project:** any of the ones you add. **Text:** found in the title or notes, ignoring case. **Deadline:** Any, or Overdue (before today). A task must match every one you set.
+- **Save** keeps it (each search needs its own name); **Cancel** leaves it as it was; **Delete search** asks before deleting. Your tasks are never changed by a search.
+- A tag or project that's no longer in Things is marked "Not found in Things" in the builder and matches nothing; remove it with **×**.
+- Click the **Searches** heading to collapse or expand the list; your browser remembers it.
+- Searches are saved in `searches.json` in the Do Things folder. Until you change one, you have the five Do Things started with.
 
 If Things doesn't apply an automatic update, Do Things pauses automatic updates and shows a red bar. The bar lists what to check, and has a **Retry** button and a button to re-enter the token.
 
@@ -208,6 +216,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `.github/workflows/release.yml` | GitHub Action that tags and releases each new version pushed to `main` |
 | `common.py` | Paths, version, logging, read-only Things database access, Things URL commands, order file, auth token |
 | `priority_check.py` | The priority, move and sequential-project rules, settings validation, grouping and ordering (pure logic) |
+| `search_check.py` | Saved searches: the default searches, checking a search, which tasks it lists and in what order, and the line describing it (pure logic) |
 | `serve.py` | Entry point: local server and JSON API |
 | `debug_things.py` | Read-only diagnostic |
 | `calendar_check.py` | Calendar event rules: checking what Calendar returned, which events show, their order, time labels and ended/now states (pure logic) |
@@ -215,6 +224,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `index.html` | The page: sidebar, task lists, drag-and-drop, editor, settings and token setup |
 | `screenshots/today.png` | The Today screenshot shown in this guide (sample data) |
 | `test_priority_check.py` | Tests for the rules |
+| `test_search_check.py` | Tests for the saved searches |
 | `test_common.py` | Tests for token handling, dates, time zone, URLs, saved files and database queries |
 | `test_serve.py` | Tests for the server against a mock Things database |
 | `test_calendar_check.py` | Tests for the calendar event rules |
@@ -223,6 +233,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `task_order.json` | Saved order within each priority; tasks that leave Today are dropped from it (untracked) |
 | `sequence_pulls.json` | The task Do Things started in each sequential project, so it can be undone (untracked) |
 | `settings.json` | Your settings: priority names, Auto assign P1, the priority for new Today tasks, the sequential-project tags and calendar events (untracked) |
+| `searches.json` | Your saved searches, in sidebar order (untracked) |
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
 
 ## Safety notes
@@ -232,6 +243,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - Tags are written as a full list, so your other tags are kept. A tag containing a comma can't be written safely, so such a task is logged and skipped.
 - In a sequential project, Do Things only ever undoes a task it started itself, and not if you've changed that task's date since. **Reset other tasks** changes other tasks of the project only when you click **Reset**, after showing which ones.
 - Calendar events are read only: Do Things never adds, changes or removes an event. Calendar is read only while events are turned on, and only turning them on in Settings can make macOS ask for access.
+- Searches only read: building, previewing, saving or deleting a search never changes a task.
 - Do Things never changes projects, only tasks. A project with two of the tags listed in Settings keeps both; the higher priority is used.
 - The server listens only on your Mac (`127.0.0.1`). It accepts only requests addressed to itself, and only accepts changes carrying a header that other websites can't add.
 - The auth token is never written to logs.
@@ -240,7 +252,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 - Things' database layout isn't published and could change with a Things update. `debug_things.py` reports missing columns.
 - Only to-dos are listed, not projects or headings.
 - Today is worked out from start dates and deadlines. It can differ from Things in edge cases, such as tasks inside a project that is itself scheduled later. By design, Do Things also lists due tasks you've removed from Things' Today.
-- The searches are fixed: P1, P2, P3, P4 and Overdue. New ones are added in code.
+- Searches are listed in the order they were added; they can't be reordered yet. Choosing an area in a search matches tasks directly in that area, not the tasks of projects inside it.
 - Changes show immediately but are confirmed with Things in the background, one at a time. While a change is pending, that task can't be dragged or opened. A change Things doesn't apply within 5 seconds is undone on the page.
 - The editor can't edit a task's checklist, change repeat settings or attachments, or take a task out of a project, area or heading. Use **Open in Things** for those.
 - Do Things runs only on the Mac where Things is installed. It has no iPhone or iPad version, but changes it makes appear there through Things' sync.
