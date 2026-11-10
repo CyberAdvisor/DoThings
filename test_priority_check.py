@@ -1,8 +1,11 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Tests for sequential-project tags in the settings
+  (parse_settings, sequence_priority, rule 3 with a tag's priority, two listed
+  tags); Next Up kind and project tag change tests removed.
 - v1.6.0 (2026-11-10): Tests for P5 and the settings (parse_settings,
   auto-assign P1 off, default priority for new Today tasks).
 - v1.5.0 (2026-11-08): Synchronized module version metadata.
@@ -25,10 +28,7 @@ from datetime import date, timedelta
 
 from priority_check import (
     DEFAULT_SETTINGS,
-    NEXT_UP_TAG,
-    SEQUENTIAL_TAG,
     Change,
-    ProjectChange,
     Settings,
     Task,
     TaskEdit,
@@ -45,7 +45,6 @@ from priority_check import (
     plan_completion,
     plan_edit,
     plan_move,
-    plan_project_tags,
     plan_refresh,
     plan_sequence,
     plan_sequence_reset,
@@ -53,9 +52,9 @@ from priority_check import (
     predict,
     prune_order,
     required_priority,
-    sequence_kind,
     sequence_next,
     sequence_place,
+    sequence_priority,
     today_counts,
     update_order,
 )
@@ -258,10 +257,26 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual((settings.names["P5"], settings.names["P1"]), ("Someday-ish", "Due Today"))
         self.assertEqual((settings.auto_p1, settings.default_priority), (True, "P3"))
         self.assertEqual(parse_settings(settings.to_json()), settings)  # Round trip.
+        self.assertEqual(DEFAULT_SETTINGS.sequence_tags, ())  # New users start with no sequential-project tags.
+
+    def test_sequence_tags(self) -> None:
+        raw = {"sequence_tags": [{"tag": " Sequential ", "priority": "P2"}, {"tag": "Next Up", "priority": "P4"}]}
+        settings = parse_settings(raw)
+        self.assertEqual(settings.sequence_tags, (("Sequential", "P2"), ("Next Up", "P4")))
+        self.assertEqual(settings.sequence_tag_names, ["Sequential", "Next Up"])
+        self.assertEqual(settings.to_json()["sequence_tags"][0], {"tag": "Sequential", "priority": "P2"})
+        self.assertEqual(parse_settings(settings.to_json()), settings)  # Round trip.
 
     def test_invalid_rejected(self) -> None:
         for raw in ([], {"names": []}, {"names": {"P6": "x"}}, {"names": {"P1": 3}}, {"names": {"P1": "a\nb"}},
-                    {"names": {"P1": "x" * 41}}, {"auto_p1": "yes"}, {"default_priority": "P6"}):
+                    {"names": {"P1": "x" * 41}}, {"auto_p1": "yes"}, {"default_priority": "P6"},
+                    {"sequence_tags": {}}, {"sequence_tags": ["Sequential"]},
+                    {"sequence_tags": [{"tag": " ", "priority": "P2"}]},
+                    {"sequence_tags": [{"tag": "a\nb", "priority": "P2"}]},
+                    {"sequence_tags": [{"tag": "x" * 61, "priority": "P2"}]},
+                    {"sequence_tags": [{"tag": "P2", "priority": "P2"}]},
+                    {"sequence_tags": [{"tag": "A", "priority": "P6"}]},
+                    {"sequence_tags": [{"tag": "A", "priority": "P2"}, {"tag": "A ", "priority": "P3"}]}):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 parse_settings(raw)
 
@@ -297,18 +312,45 @@ class AutoP1OffTests(unittest.TestCase):
 
 
 class DefaultPriorityTests(unittest.TestCase):
-    """Untagged Today tasks get the default priority from Settings; Next Up tasks still get P4."""
+    """Untagged Today tasks get the default priority from Settings; sequential projects' tasks get their tag's."""
 
     def test_default_priority(self) -> None:
-        settings = Settings(default_priority="P3")
+        settings = Settings(default_priority="P3", sequence_tags=(("Next Up", "P4"),))
         self.assertEqual(plan_refresh(make_task(tags=["Home"], start_date=TODAY), TODAY, settings).tags, ["Home", "P3"])
-        next_up = replace(make_task(start_date=TODAY), next_up=True)
+        next_up = replace(make_task(start_date=TODAY), project_tags=["Next Up"])
         self.assertEqual(required_priority(next_up, TODAY, settings), "P4")
         self.assertEqual(required_priority(make_task(tags=["P2"], start_date=TODAY), TODAY, settings), "P2")
 
 
-class NextUpTests(unittest.TestCase):
-    """P4 (Next Up): the lowest priority, and Next Up projects that start their task as P4."""
+class SequenceTagTests(unittest.TestCase):
+    """The tags listed in Settings decide a sequential project's priority (refresh rule 3)."""
+
+    SETTINGS = Settings(sequence_tags=(("Next Up", "P4"), ("Sequential", "P2"), ("Reading", "P5")))
+
+    def test_sequence_priority(self) -> None:
+        self.assertEqual(sequence_priority(["Home", "Sequential"], self.SETTINGS), "P2")
+        self.assertEqual(sequence_priority(["Reading"], self.SETTINGS), "P5")
+        # Two listed tags: the higher priority wins, whatever the list order.
+        self.assertEqual(sequence_priority(["Next Up", "Sequential"], self.SETTINGS), "P2")
+        self.assertIsNone(sequence_priority(["Home"], self.SETTINGS))
+        self.assertIsNone(sequence_priority([], self.SETTINGS))
+        self.assertIsNone(sequence_priority(["Sequential"], DEFAULT_SETTINGS))  # Nothing listed.
+        self.assertIsNone(sequence_priority(["sequential"], self.SETTINGS))  # Matched exactly.
+
+    def test_untagged_task_gets_its_tags_priority(self) -> None:
+        task = make_task(start_date=TODAY)
+        task.project_tags = ["Next Up", "Home"]
+        self.assertEqual(required_priority(task, TODAY, self.SETTINGS), "P4")
+        self.assertEqual(plan_refresh(task, TODAY, self.SETTINGS).tags, ["P4"])
+        self.assertEqual(required_priority(task, TODAY), "P2")  # Not listed in the default settings.
+        task.tags = ["P3"]  # Moved by hand: the tag wins.
+        self.assertEqual(required_priority(task, TODAY, self.SETTINGS), "P3")
+        task.deadline = TODAY
+        self.assertEqual(required_priority(task, TODAY, self.SETTINGS), "P1")
+
+
+class P4Tests(unittest.TestCase):
+    """P4 ranks below P1-P3, and moves into and out of it follow the move rules."""
 
     def test_p4_is_lowest(self) -> None:
         self.assertEqual(required_priority(make_task(tags=["P4"]), TODAY), "P4")
@@ -332,31 +374,6 @@ class NextUpTests(unittest.TestCase):
         self.assertEqual(place_in_list(task, "p4", TODAY), "list")
         self.assertIsNone(place_in_list(task, "p3", TODAY))
         self.assertEqual(place_in_list(task, "today", TODAY), "P4")
-
-    def test_sequence_kind(self) -> None:
-        self.assertEqual(sequence_kind(["Home", SEQUENTIAL_TAG]), SEQUENTIAL_TAG)
-        self.assertEqual(sequence_kind([NEXT_UP_TAG]), NEXT_UP_TAG)
-        self.assertEqual(sequence_kind([NEXT_UP_TAG, SEQUENTIAL_TAG]), SEQUENTIAL_TAG)  # Sequential wins.
-        self.assertIsNone(sequence_kind(["Home"]))
-
-    def test_next_up_removed_when_also_sequential(self) -> None:
-        change = plan_project_tags("proj", ["Home", NEXT_UP_TAG, SEQUENTIAL_TAG])
-        self.assertEqual(change, ProjectChange("proj", ["Home", SEQUENTIAL_TAG]))
-        self.assertTrue(change.is_satisfied_by([SEQUENTIAL_TAG, "Home"]))
-        self.assertFalse(change.is_satisfied_by(["Home", NEXT_UP_TAG, SEQUENTIAL_TAG]))
-        self.assertIsNone(plan_project_tags("proj", [NEXT_UP_TAG]))
-        self.assertIsNone(plan_project_tags("proj", [SEQUENTIAL_TAG]))
-
-    def test_untagged_next_up_task_is_p4(self) -> None:
-        task = make_task(start_date=TODAY)
-        task.next_up = True
-        self.assertEqual(required_priority(task, TODAY), "P4")
-        self.assertEqual(plan_refresh(task, TODAY).tags, ["P4"])
-        task.tags = ["P2"]  # Moved by hand: the tag wins.
-        self.assertEqual(required_priority(task, TODAY), "P2")
-        task.deadline = TODAY
-        self.assertEqual(required_priority(task, TODAY), "P1")
-        self.assertEqual(required_priority(make_task(start_date=TODAY), TODAY), "P2")  # Not Next Up.
 
     def test_undo_removes_p4(self) -> None:
         reopened = in_project("first", "N", (0, 0, 9), start_date=TODAY)

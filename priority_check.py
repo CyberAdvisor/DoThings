@@ -4,13 +4,19 @@ Pure logic with no I/O, so every rule can be unit-tested without Things.
 It decides which priority tag (P1-P5) a task should carry, what changes a
 manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
-display. It also decides what kind of sequence a project tagged Sequential or
-Next Up is, and which task such a project starts next, and validates the
-user's settings (priority names and options).
+display. It also decides which priority a sequential project's tasks get
+(from the project tags listed in Settings) and which task such a project
+starts next, and validates the user's settings (priority names, options and
+sequential-project tags).
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Sequential-project tags come from Settings
+  (Settings.sequence_tags, each with a priority); sequence_priority replaces
+  Task.next_up and the fixed Sequential and Next Up tags (Task.project_tags);
+  ProjectChange, plan_project_tags and sequence_kind removed, so Do Things never
+  changes projects.
 - v1.6.0 (2026-11-10): P5 priority; Settings (priority names, auto-assign P1,
   default priority for new Today tasks) with parse_settings; the rules take the
   settings: with auto-assign off a due task keeps its priority and moves leave
@@ -44,14 +50,7 @@ PRIORITIES = ("P1", "P2", "P3", "P4", "P5")
 # pills). The user can rename them in Settings; an empty name shows the tag.
 DEFAULT_PRIORITY_NAMES = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up", "P5": ""}
 MAX_PRIORITY_NAME_CHARS = 40
-
-# Project tags in Things that make a project release its tasks one at a time.
-# An untagged Today task of a Next Up project becomes P4 (refresh rule 3);
-# any other untagged Today task, Sequential ones included, becomes P2. A
-# project tagged both is Sequential.
-SEQUENTIAL_TAG = "Sequential"
-NEXT_UP_TAG = "Next Up"
-SEQUENCE_TAGS = (SEQUENTIAL_TAG, NEXT_UP_TAG)
+MAX_SEQUENCE_TAG_CHARS = 60
 
 
 @dataclass
@@ -75,7 +74,7 @@ class Task:
     project_rank: Tuple[int, int, int] = (0, 0, 0)
     repeating: bool = False  # A copy of a repeating to-do (shown with a ↻ icon).
     has_checklist: bool = False
-    next_up: bool = False  # In a project tagged Next Up and not Sequential: untagged, it is P4.
+    project_tags: List[str] = field(default_factory=list)  # Its project's tags (directly or via its heading).
     reminder: Optional[dt_time] = None  # Reminder time set in Things; display only, no rule uses it.
 
     @property
@@ -136,18 +135,6 @@ class Change:
         return True
 
 
-@dataclass
-class ProjectChange:
-    """A write to send to Things for one project: replace its tags with `tags`."""
-
-    project_id: str
-    tags: List[str]
-
-    def is_satisfied_by(self, project_tags: Iterable[str]) -> bool:
-        """Return True when the project's tags (re-read from Things) reflect this change."""
-        return set(project_tags) == set(self.tags)
-
-
 @dataclass(frozen=True)
 class Settings:
     """The user's settings that the rules and display use.
@@ -156,16 +143,30 @@ class Settings:
     refresh rule 1 (due today or overdue -> P1) is on; when off, a due task
     keeps its priority and moves into or out of P1 leave the deadline alone.
     `default_priority`: what an untagged Today task gets (refresh rule 3),
-    except a task of a Next Up project, which gets P4.
+    except a task of a sequential project. `sequence_tags`: (project tag,
+    priority) pairs, in the user's order; a project with one of these tags in
+    Things works one task at a time, and its untagged Today tasks get that
+    priority (sequence_priority). Empty until the user adds some.
     """
 
     names: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_PRIORITY_NAMES))
     auto_p1: bool = True
     default_priority: str = "P2"
+    sequence_tags: Tuple[Tuple[str, str], ...] = ()
+
+    @property
+    def sequence_tag_names(self) -> List[str]:
+        """Return the listed sequential-project tags, in the user's order."""
+        return [tag for tag, _ in self.sequence_tags]
 
     def to_json(self) -> Dict[str, object]:
         """Return the settings as stored in settings.json and sent to the page."""
-        return {"names": dict(self.names), "auto_p1": self.auto_p1, "default_priority": self.default_priority}
+        return {
+            "names": dict(self.names),
+            "auto_p1": self.auto_p1,
+            "default_priority": self.default_priority,
+            "sequence_tags": [{"tag": tag, "priority": priority} for tag, priority in self.sequence_tags],
+        }
 
 
 # Settings until the user changes them (also what the rules use when given none).
@@ -194,7 +195,34 @@ def parse_settings(raw: object) -> Settings:
     default_priority = raw.get("default_priority", DEFAULT_SETTINGS.default_priority)
     if default_priority not in PRIORITIES:
         raise ValueError("The priority for new Today tasks must be one of P1 to P5.")
-    return Settings(names=names, auto_p1=auto_p1, default_priority=default_priority)
+    sequence_tags = _parse_sequence_tags(raw.get("sequence_tags", []))
+    return Settings(names=names, auto_p1=auto_p1, default_priority=default_priority, sequence_tags=sequence_tags)
+
+
+def _parse_sequence_tags(given: object) -> Tuple[Tuple[str, str], ...]:
+    """Return validated (tag, priority) pairs from settings JSON; raise ValueError naming the first problem.
+
+    Tags are trimmed and matched exactly as typed. Refused: an empty or
+    multi-line tag, a P tag (P1-P5 are priorities, not projects' tags), a tag
+    listed twice and a priority other than P1-P5.
+    """
+    if not isinstance(given, list):
+        raise ValueError("Sequential projects must be a list of tags with a priority.")
+    pairs: List[Tuple[str, str]] = []
+    for entry in given:
+        if not isinstance(entry, dict) or not isinstance(entry.get("tag"), str):
+            raise ValueError("Each sequential-project tag needs a tag name and a priority.")
+        tag = entry["tag"].strip()
+        if not tag or "\n" in tag or len(tag) > MAX_SEQUENCE_TAG_CHARS:
+            raise ValueError(f"A sequential-project tag must be one line of 1 to {MAX_SEQUENCE_TAG_CHARS} characters.")
+        if tag in PRIORITIES:
+            raise ValueError(f"{tag} is a priority tag, so it can't also mark sequential projects.")
+        if tag in (t for t, _ in pairs):
+            raise ValueError(f"The tag {tag} is listed twice.")
+        if entry.get("priority") not in PRIORITIES:
+            raise ValueError(f"The priority for {tag} must be one of P1 to P5.")
+        pairs.append((tag, entry["priority"]))
+    return tuple(pairs)
 
 
 def priority_tags(tags: Iterable[str]) -> List[str]:
@@ -214,16 +242,32 @@ def is_due(task: Task, today: date) -> bool:
     return task.deadline is not None and task.deadline <= today
 
 
+def sequence_priority(project_tags: Iterable[str], settings: Settings) -> Optional[str]:
+    """Return the priority of a project's listed sequential-project tags, or None if it has none.
+
+    With several listed tags the highest priority wins; the others are
+    ignored (never removed from the project).
+    """
+    tags = set(project_tags)
+    found = [priority for tag, priority in settings.sequence_tags if tag in tags]
+    return min(found, key=PRIORITIES.index) if found else None
+
+
 def required_priority(task: Task, today: date, settings: Settings = DEFAULT_SETTINGS) -> str:
     """Return the priority a Today task must carry under the refresh rules.
 
     Rules, in order: overdue or due today -> P1 (only while settings.auto_p1
-    is on); otherwise the highest P tag it already has; otherwise P4 for a
-    task of a Next Up project, else settings.default_priority.
+    is on); otherwise the highest P tag it already has; otherwise the
+    priority of its sequential project's tag (sequence_priority), else
+    settings.default_priority.
     """
     if settings.auto_p1 and is_due(task, today):
         return "P1"
-    return current_priority(task.tags) or ("P4" if task.next_up else settings.default_priority)
+    return (
+        current_priority(task.tags)
+        or sequence_priority(task.project_tags, settings)
+        or settings.default_priority
+    )
 
 
 def _with_priority(tags: List[str], priority: str) -> List[str]:
@@ -488,29 +532,13 @@ def sequence_place(project_tasks: Iterable[Task], task_id: str, completed: int) 
     return completed + position, completed + len(ordered)
 
 
-def sequence_kind(project_tags: Iterable[str]) -> Optional[str]:
-    """Return the project's sequence kind (SEQUENTIAL_TAG or NEXT_UP_TAG), or None if neither.
-
-    A project tagged both is Sequential (plan_project_tags removes Next Up).
-    """
-    tags = set(project_tags)
-    return next((kind for kind in SEQUENCE_TAGS if kind in tags), None)
-
-
-def plan_project_tags(project_id: str, project_tags: List[str]) -> Optional[ProjectChange]:
-    """Return the change that removes Next Up from a project also tagged Sequential, if needed."""
-    if SEQUENTIAL_TAG not in project_tags or NEXT_UP_TAG not in project_tags:
-        return None
-    return ProjectChange(project_id, [t for t in project_tags if t != NEXT_UP_TAG])
-
-
 def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change]:
     """Return the change that puts a sequential project's next task in Today, if needed.
 
     The task in progress (sequence_next) gets a start date of today when it
     has none. While it is open nothing else is pulled in; once it is done the
     next undated task is. Its P tag comes from refresh rule 3 in the same
-    refresh: P4 in a Next Up project, the default priority in a Sequential one.
+    refresh: the priority set for the project's tag (sequence_priority).
     """
     task = sequence_next(project_tasks, today)
     if task is None or task.start_date is not None:

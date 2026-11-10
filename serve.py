@@ -8,9 +8,14 @@ and stores the Things auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Sequential projects are the ones with a tag listed in
+  Settings (step_sequences, sequence_labels and Reset other tasks take the
+  settings); records of projects not stepped are kept but not acted on; the
+  list and settings responses send missing_sequence_tags; projects tagged with
+  two listed tags are no longer changed (fix_sequence_tags removed).
 - v1.6.0 (2026-11-10): GET and POST /api/settings (priority names, auto-assign
   P1, default priority for new Today tasks, and which P tags are missing); the
   rules use the saved settings; Today's group labels are the priority names;
@@ -54,7 +59,6 @@ from common import (
     SERVER_PORT,
     THINGS_LISTS,
     apply_change,
-    apply_project_change,
     build_show_url,
     count_completed,
     count_inbox,
@@ -65,6 +69,7 @@ from common import (
     load_pulls,
     load_token,
     missing_priority_tags,
+    missing_tags,
     move_to_trash,
     open_things_db,
     open_things_url,
@@ -72,7 +77,6 @@ from common import (
     read_edit_options,
     read_last_completed,
     read_list,
-    read_sequence_project_tags,
     read_sequential_projects,
     read_task,
     load_settings,
@@ -99,7 +103,6 @@ from priority_check import (
     plan_completion,
     plan_edit,
     plan_move,
-    plan_project_tags,
     plan_refresh,
     plan_sequence,
     plan_sequence_reset,
@@ -109,6 +112,7 @@ from priority_check import (
     prune_order,
     required_priority,
     sequence_place,
+    sequence_priority,
     today_counts,
     update_order,
 )
@@ -239,7 +243,7 @@ def apply_refresh_rules(
     """
     if token is None or missing_tags:
         return False
-    if step_sequences(db_path, token, today):
+    if step_sequences(db_path, token, today, settings):
         return True
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, "today", today)
@@ -250,12 +254,12 @@ def apply_refresh_rules(
     return False
 
 
-def step_sequences(db_path: str, token: str, today: date) -> bool:
+def step_sequences(db_path: str, token: str, today: date, settings: Settings) -> bool:
     """Start or undo the next task of each sequential project. Returns True if a write failed.
 
-    Sequential and Next Up projects work the same way (a Next Up project's
-    task then gets P4 from refresh rule 3, a Sequential one's the default priority). A project tagged both first has Next Up removed in
-    Things (fix_sequence_tags) and is then Sequential.
+    A sequential project is an open project with one of the tags listed in
+    Settings (settings.sequence_tags); every listed tag works the same way,
+    and the started task gets its tag's priority from refresh rule 3.
 
     Each started task is recorded (sequence_pulls.json) with the date given
     and the task whose completion led to it, so only tasks Do Things started
@@ -265,16 +269,16 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
     (plan_sequence_undo) and the reopened task is recorded as in progress
     instead; Things moves a reopened task to the bottom of the project, so
     position can't be relied on. With no task in progress, the next undated
-    task is started (plan_sequence). Records that no longer apply are dropped.
+    task is started (plan_sequence). A stepped project's record that no longer
+    applies is dropped. Records of projects not stepped now (their tag was
+    removed from Settings, or no open to-dos) are kept but not acted on, so a
+    tag added back to Settings picks its task in progress up again.
     """
     with open_things_db(db_path) as conn:
-        project_tags = read_sequence_project_tags(conn)
-        projects = read_sequential_projects(conn)
+        projects = read_sequential_projects(conn, settings.sequence_tag_names)
         last_done = read_last_completed(conn, projects)
-    if not fix_sequence_tags(project_tags, token, db_path):
-        return True
     pulls = load_pulls()
-    kept = {p: pulls[p] for p in pulls if p in projects}  # Drop projects no longer sequential or open.
+    kept = dict(pulls)
     for project, tasks in projects.items():
         record = kept.get(project)
         pulled = find_pulled(tasks, record.task, record.started_on) if record else None
@@ -301,21 +305,6 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
     return False
 
 
-def fix_sequence_tags(project_tags: Dict[str, List[str]], token: str, db_path: str) -> bool:
-    """Remove Next Up from every project also tagged Sequential. Returns False if a write failed.
-
-    `project_tags` is updated to the confirmed tags, so the project is then Sequential.
-    """
-    for project, tags in project_tags.items():
-        change = plan_project_tags(project, tags)
-        if change is None:
-            continue
-        if not apply_project_change(change, token, db_path):
-            return False
-        project_tags[project] = change.tags
-    return True
-
-
 def save_and_fail(kept: Dict[str, Pull], pulls: Dict[str, Pull]) -> bool:
     """Save the records changed so far after a failed write, and report the failure."""
     if kept != pulls:
@@ -323,13 +312,14 @@ def save_and_fail(kept: Dict[str, Pull], pulls: Dict[str, Pull]) -> bool:
     return True
 
 
-def sequence_labels(conn: sqlite3.Connection) -> Dict[str, str]:
+def sequence_labels(conn: sqlite3.Connection, settings: Settings) -> Dict[str, str]:
     """Return {task id: "task N of M"} for each task a sequential project started.
 
-    Only tasks still open with the start date Do Things gave them count
-    (find_pulled). N and M come from sequence_place.
+    Only tasks still open with the start date Do Things gave them, in a project
+    with a tag listed in Settings, count (find_pulled). N and M come from
+    sequence_place.
     """
-    projects = read_sequential_projects(conn)
+    projects = read_sequential_projects(conn, settings.sequence_tag_names)
     done = count_completed(conn, projects)
     labels = {}
     for project, record in load_pulls().items():
@@ -359,6 +349,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
     settings = load_settings()
     with open_things_db(db_path) as conn:
         missing = missing_priority_tags(conn)
+        missing_sequence = missing_tags(conn, settings.sequence_tag_names)
     if not RefreshPause.paused and apply_refresh_rules(db_path, token, today, missing, settings):
         RefreshPause.paused = True
         get_logger().error("Automatic updates paused until Retry: Things didn't confirm a change.")
@@ -366,7 +357,7 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         today_tasks = read_today(conn, today)
         tasks = today_tasks if name == "today" else read_list(conn, name, today)
         counts = {"inbox": count_inbox(conn), "today": today_counts(today_tasks, today)}
-        labels = sequence_labels(conn)
+        labels = sequence_labels(conn, settings)
     order = load_order()
     kept = prune_order(order, [t.uuid for t in today_tasks])  # Forget tasks that left Today.
     if kept != {p: order.get(p, []) for p in PRIORITIES}:
@@ -378,6 +369,8 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "token_set": token is not None,
         "refresh_paused": RefreshPause.paused,
         "missing_tags": missing,
+        # Listed sequential-project tags not in Things: only their projects are skipped.
+        "missing_sequence_tags": missing_sequence,
         "priorities": list(PRIORITIES),
         "priority_names": settings.names,
         "counts": counts,
@@ -507,20 +500,20 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         task = read_task(conn, task_id)
         options = read_edit_options(conn)
         checklist = read_checklist_progress(conn, task_id)
-        sequence_projects = read_sequence_project_tags(conn)
     if task is None:
         raise ApiError(404, "Task not found in Things.")
+    settings = load_settings()
     detail = task_to_json(task, today)
     detail.update(
         other_tags=[t for t in task.tags if t not in PRIORITIES],  # The editor shows priority separately.
         notes=task.notes,
         when=when_json(task, today),
-        priority=required_priority(task, today, load_settings()),
+        priority=required_priority(task, today, settings),
         list_id=task.list_id,
         heading_id=task.heading_id,
         checklist=checklist,
-        # The project's name if it is Sequential or Next Up, so the editor offers "Reset other tasks".
-        sequence_project=task.context if task.project_id in sequence_projects else None,
+        # The project's name if it is a sequential project, so the editor offers "Reset other tasks".
+        sequence_project=task.context if sequence_priority(task.project_tags, settings) else None,
     )
     return {"task": detail, "options": options, "today": today.isoformat()}
 
@@ -610,7 +603,7 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
 
     Returns the When, deadline and priority the save would end up with (after
     the edit and refresh rules), the task's row as it will look, and where it
-    will appear in the list `list` the page is showing ("P1"-"P4" in Today,
+    will appear in the list `list` the page is showing ("P1"-"P5" in Today,
     "list" in a search, None if it leaves the list). The page shows these
     instead of working out the rules itself.
     """
@@ -634,7 +627,7 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
     if after.start_date == task.start_date and after.list_id == task.list_id:
         # Still the started task of its sequential project (changing its date ends that).
         with open_things_db(db_path) as conn:
-            sequence = sequence_labels(conn).get(task.uuid)
+            sequence = sequence_labels(conn, settings).get(task.uuid)
     return {
         "when": when_json(after, today),
         "deadline": after.deadline.isoformat() if after.deadline else None,
@@ -670,16 +663,16 @@ def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
 def plan_reset_request(body: Dict[str, Any]) -> Tuple[Task, List[Change], str, List[str]]:
     """Validate a "Reset other tasks" request and return (task, changes, db_path, missing P tags).
 
-    The task must be open and in an open Sequential or Next Up project; the
-    changes come from plan_sequence_reset.
+    The task must be open and in an open sequential project (one with a tag
+    listed in Settings); the changes come from plan_sequence_reset.
     """
     task, db_path, missing = load_task(body.get("id"))
     if task.completed:
         raise ApiError(409, "Uncheck the task before resetting its project.")
     with open_things_db(db_path) as conn:
-        projects = read_sequential_projects(conn)
+        projects = read_sequential_projects(conn, load_settings().sequence_tag_names)
     if task.project_id not in projects:
-        raise ApiError(409, "This task isn't in a Sequential or Next Up project.")
+        raise ApiError(409, "This task isn't in a sequential project.")
     return task, plan_sequence_reset(projects[task.project_id], task, today_local()), db_path, missing
 
 
@@ -758,13 +751,20 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def settings_response() -> Dict[str, Any]:
-    """Return the saved settings, the priorities and which P tags are missing in Things.
+    """Return the saved settings, the priorities, and which P tags and sequential-project tags are missing in Things.
 
-    Settings shows each priority as found or missing in Things.
+    Settings shows each priority and each sequential-project tag as found or missing in Things.
     """
+    settings = load_settings()
     with open_things_db(require_db_path()) as conn:
         missing = missing_priority_tags(conn)
-    return {"settings": load_settings().to_json(), "priorities": list(PRIORITIES), "missing_tags": missing}
+        missing_sequence = missing_tags(conn, settings.sequence_tag_names)
+    return {
+        "settings": settings.to_json(),
+        "priorities": list(PRIORITIES),
+        "missing_tags": missing,
+        "missing_sequence_tags": missing_sequence,
+    }
 
 
 def update_settings(body: Dict[str, Any]) -> Dict[str, Any]:

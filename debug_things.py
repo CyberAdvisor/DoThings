@@ -3,13 +3,17 @@
 Prints where the Things database is, whether the columns Do Things relies on
 exist, whether the P1-P5 tags exist, the saved settings, and every Today task with its tags,
 dates, completion, project order, required priority and the change the refresh rules
-would make, plus each sequential (Sequential or Next Up) project's kind and task in progress,
+would make, plus whether each sequential-project tag listed in Settings exists in Things,
+and each sequential project's tag, priority and task in progress,
 and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Sequential projects come from the tags listed in
+  Settings: prints which listed tags are missing in Things, and each project's
+  winning tag and priority (no more Sequential/Next Up kinds).
 - v1.6.0 (2026-11-10): Prints the saved settings and plans each Today task's
   change with them.
 - v1.5.0 (2026-11-08): Synchronized module version metadata.
@@ -34,10 +38,10 @@ from common import (
     load_pulls,
     load_settings,
     missing_priority_tags,
+    missing_tags,
     open_things_db,
     read_list,
     read_raw_reminder_times,
-    read_sequence_project_tags,
     read_sequential_projects,
     today_local,
     unpack_things_time,
@@ -45,12 +49,11 @@ from common import (
 from priority_check import (
     Change,
     find_pulled,
-    plan_project_tags,
     plan_refresh,
     plan_sequence,
     required_priority,
-    sequence_kind,
     sequence_next,
+    sequence_priority,
 )
 
 # Columns the queries in common.py depend on.
@@ -117,18 +120,19 @@ def run() -> None:
             return
         missing = missing_priority_tags(conn)
         print(f"Priority tags missing in Things: {', '.join(missing) if missing else 'none'}")
+        missing_sequence = missing_tags(conn, settings.sequence_tag_names)
+        print(f"Sequential-project tags missing in Things: {', '.join(missing_sequence) if missing_sequence else 'none'}")
         tasks = read_list(conn, "today", today)
-        projects = read_sequential_projects(conn)
-        project_tags = read_sequence_project_tags(conn)
+        projects = read_sequential_projects(conn, settings.sequence_tag_names)
         reminders = read_raw_reminder_times(conn, [task.uuid for task in tasks])
     pulls = load_pulls()
-    print(f"\nSequential and Next Up projects: {len(projects)}")
+    print(f"\nSequential projects (with open to-dos): {len(projects)}")
     for project, project_tasks in projects.items():
-        tags = project_tags.get(project, [])
-        kind = sequence_kind(tags)
-        label = kind
-        if plan_project_tags(project, tags) is not None:
-            label = f"{kind}; also tagged Next Up, which the refresh removes"
+        project_tags = project_tasks[0].project_tags
+        priority = sequence_priority(project_tags, settings)
+        # The listed tag with the winning priority (a project may carry several listed tags).
+        tag = next(t for t, p in settings.sequence_tags if p == priority and t in project_tags)
+        label = f"{tag} -> {priority}"
         record = pulls.get(project)
         recorded = find_pulled(project_tasks, record.task, record.started_on) if record else None
         if recorded is not None:

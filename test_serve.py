@@ -3,9 +3,14 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Sequential projects come from the tags listed in the
+  saved settings (use_sequence_tags): tests for a tag's priority, two listed
+  tags on one project (higher priority, project never changed), no tags
+  listed, records kept while a tag is unlisted, a changed priority, missing
+  sequential-project tags, and saving the list; project-change tests removed.
 - v1.6.0 (2026-11-10): Tests for /api/settings, names on Today's groups,
   the default priority, auto-assign P1 off, priority pills and P5; settings
   kept in the temporary folder.
@@ -34,7 +39,7 @@ from http.server import BaseHTTPRequestHandler
 from unittest import mock
 
 import serve
-from priority_check import Task
+from priority_check import Settings, Task
 from common import (
     Pull,
     START_ANYTIME,
@@ -88,7 +93,6 @@ class MockThingsTestCase(unittest.TestCase):
             patch.start()
             self.addCleanup(patch.stop)
         self.apply_change = mock.patch.object(serve, "apply_change", return_value=True).start()
-        self.apply_project_change = mock.patch.object(serve, "apply_project_change", return_value=True).start()
         self.addCleanup(mock.patch.stopall)
 
     def tearDown(self) -> None:
@@ -98,6 +102,10 @@ class MockThingsTestCase(unittest.TestCase):
         """Create more tags in the mock database."""
         with write_db(self.db_path) as conn:
             conn.executemany("INSERT INTO TMTag VALUES (?, ?)", [(n, n) for n in names])
+
+    def use_sequence_tags(self, *pairs: tuple) -> None:
+        """Save settings that list these (project tag, priority) pairs as sequential-project tags."""
+        save_settings(Settings(sequence_tags=tuple(pairs)), self.settings_path)
 
 
 class MissingTagTests(MockThingsTestCase):
@@ -215,6 +223,7 @@ class ProjectTests(MockThingsTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.add_tags("P2", "P3", "P4", "P5", "Sequential")
+        self.use_sequence_tags(("Sequential", "P2"))
         started = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
@@ -356,12 +365,13 @@ class ProjectTests(MockThingsTestCase):
         self.assertEqual(self.started(), ["s2", "s1"])
 
 
-class NextUpTests(MockThingsTestCase):
-    """Next Up projects start their next task as P4, shown in Today's Next Up group."""
+class SequenceTagTests(MockThingsTestCase):
+    """Sequential projects are the ones with a tag listed in Settings, each with its own priority."""
 
     def setUp(self) -> None:
         super().setUp()
         self.add_tags("P2", "P3", "P4", "P5", "Sequential", "Next Up")
+        self.use_sequence_tags(("Sequential", "P2"), ("Next Up", "P4"))
         with write_db(self.db_path) as conn:
             conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
             conn.executemany(
@@ -383,37 +393,94 @@ class NextUpTests(MockThingsTestCase):
         return {c[0][0].task_id: c[0][0].tags for c in self.apply_change.call_args_list
                 if c[0][0].set_start_date == TODAY}
 
-    def test_next_up_task_started_as_p4_and_shown_in_its_group(self) -> None:
+    def tagged(self) -> dict:
+        """{task id: tags sent} for each change the refresh sent."""
+        return {c[0][0].task_id: c[0][0].tags for c in self.apply_change.call_args_list}
+
+    def start(self, *uuids: str) -> None:
+        """Give the tasks a start date of today, as Things would after a start."""
+        with write_db(self.db_path) as conn:
+            conn.executemany("UPDATE TMTask SET startDate = ? WHERE uuid = ?",
+                             [(pack_things_date(TODAY), u) for u in uuids])
+
+    def test_tag_priority_given_and_shown_in_its_group(self) -> None:
         serve.list_response("today")
         self.assertEqual(self.starts(), {"b1": None, "x1": None})
-        with write_db(self.db_path) as conn:  # As Things applied the start.
-            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b1'", (pack_things_date(TODAY),))
+        self.start("b1")
         self.apply_change.reset_mock()
         serve.list_response("today")
         self.assertEqual(self.starts(), {"x1": None})  # b1 is in progress; nothing else from Books.
-        tagged = {c[0][0].task_id: c[0][0].tags for c in self.apply_change.call_args_list}
-        self.assertEqual(tagged["b1"], ["P4"])  # Refresh rule 3: a Next Up task becomes P4.
-        self.assertIsNone(tagged["x1"])  # Started; the project tagged both is Sequential.
+        self.assertEqual(self.tagged()["b1"], ["P4"])  # Refresh rule 3: Next Up is set to P4.
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
         response = serve.list_response("today")
         self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4", "P5"])
-        last = response["groups"][-2]
-        self.assertEqual((last["priority"], last["label"]), ("P4", "Next Up"))
-        self.assertEqual([(t["id"], t["sequence"], t["tags"]) for t in last["tasks"]], [("b1", "task 1 of 2", [])])
+        group = response["groups"][3]
+        self.assertEqual((group["priority"], group["label"]), ("P4", "Next Up"))
+        self.assertEqual([(t["id"], t["sequence"], t["tags"]) for t in group["tasks"]], [("b1", "task 1 of 2", [])])
         self.assertEqual([t["id"] for t in serve.list_response("p4")["tasks"]], ["b1"])
 
-    def test_next_up_removed_from_project_also_sequential(self) -> None:
+    def test_two_listed_tags_higher_priority_wins_and_project_unchanged(self) -> None:
+        self.start("x1")
         serve.list_response("today")
-        change = self.apply_project_change.call_args[0][0]
-        self.assertEqual((change.project_id, change.tags), ("both", ["Sequential"]))
-        self.assertEqual(self.apply_project_change.call_count, 1)
+        self.assertEqual(self.tagged()["x1"], ["P2"])  # Sequential (P2) beats Next Up (P4).
+        # Only task changes are ever sent; the project keeps both tags.
+        self.assertTrue(all(c[0][0].task_id in ("b1", "x1") for c in self.apply_change.call_args_list))
 
-    def test_unconfirmed_project_change_pauses_updates(self) -> None:
-        self.apply_project_change.return_value = False
+    def test_custom_tag_and_priority(self) -> None:
+        self.add_tags("Reading List")
+        self.use_sequence_tags(("Reading List", "P5"))
+        with write_db(self.db_path) as conn:
+            conn.execute("UPDATE TMTaskTag SET tags = 'Reading List' WHERE tasks = 'books'")
+        serve.list_response("today")
+        self.assertEqual(self.starts(), {"b1": None})  # "both" has no listed tag now.
+        self.start("b1")
+        self.apply_change.reset_mock()
+        serve.list_response("today")
+        self.assertEqual(self.tagged(), {"b1": ["P5"]})
+
+    def test_no_tags_listed_nothing_started_and_records_kept(self) -> None:
+        save_pulls({"books": Pull("b1", TODAY, None)}, self.pulls_path)
+        self.start("b1")
+        self.use_sequence_tags()
         response = serve.list_response("today")
-        self.assertTrue(response["refresh_paused"])
-        self.apply_change.assert_not_called()  # Nothing is started until the tags are fixed.
+        self.assertEqual(self.starts(), {})
+        self.assertEqual(self.tagged(), {"b1": ["P2"]})  # An ordinary Today task now: the default priority.
+        self.assertEqual(response["missing_sequence_tags"], [])
+        self.assertIsNone(response["groups"][1]["tasks"][0]["sequence"])
+        # The record is kept, not acted on, and used again once the tag is listed again.
+        self.assertEqual(load_pulls(self.pulls_path), {"books": Pull("b1", TODAY, None)})
+        self.use_sequence_tags(("Next Up", "P4"))
+        rows = {t["id"]: t for g in serve.list_response("today")["groups"] for t in g["tasks"]}
+        self.assertEqual(rows["b1"]["sequence"], "task 1 of 2")
+
+    def test_unlisted_tag_no_longer_undone(self) -> None:
+        # b2 was started after b1 was completed; b1 is then reopened while Next Up isn't listed.
+        save_pulls({"books": Pull("b2", TODAY, "b1")}, self.pulls_path)
+        self.start("b2")
+        self.use_sequence_tags(("Sequential", "P2"))
+        serve.list_response("today")
+        self.assertNotIn("b2", [c[0][0].task_id for c in self.apply_change.call_args_list
+                                if c[0][0].set_when == "anytime"])
+
+    def test_changed_priority_keeps_started_task_tag(self) -> None:
+        self.start("b1")
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
+        self.use_sequence_tags(("Sequential", "P2"), ("Next Up", "P3"))
+        serve.list_response("today")
+        self.assertNotIn("b1", self.tagged())  # Already P4: kept.
+        self.start("b2")  # A newly dated, untagged task gets the new priority.
+        serve.list_response("today")
+        self.assertEqual(self.tagged()["b2"], ["P3"])
+
+    def test_missing_sequence_tag_reported_and_others_still_run(self) -> None:
+        self.use_sequence_tags(("Next Up", "P4"), ("Reading List", "P5"))
+        response = serve.list_response("today")
+        self.assertEqual(response["missing_sequence_tags"], ["Reading List"])
+        self.assertFalse(response["refresh_paused"])
+        self.assertEqual(self.starts(), {"b1": None, "x1": None})  # Both projects carry Next Up.
+        self.assertEqual(serve.settings_response()["missing_sequence_tags"], ["Reading List"])
 
     def test_refresh_waits_for_p4_tag(self) -> None:
         with write_db(self.db_path) as conn:
@@ -421,11 +488,9 @@ class NextUpTests(MockThingsTestCase):
         response = serve.list_response("today")
         self.assertEqual(response["missing_tags"], ["P4"])
         self.apply_change.assert_not_called()
-        self.apply_project_change.assert_not_called()
 
     def test_move_to_p4(self) -> None:
-        with write_db(self.db_path) as conn:
-            conn.execute("UPDATE TMTask SET startDate = ? WHERE uuid = 'b2'", (pack_things_date(TODAY),))
+        self.start("b2")
         self.assertEqual(serve.move_task({"id": "b2", "priority": "P4", "order": ["b2"]}), {"ok": True})
         self.assertEqual(self.apply_change.call_args[0][0].tags, ["P4"])
 
@@ -436,6 +501,7 @@ class SequenceResetTests(MockThingsTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.add_tags("P2", "P3", "P4", "P5", "Next Up", "Home")
+        self.use_sequence_tags(("Next Up", "P4"))
         today = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") "
@@ -479,7 +545,7 @@ class SequenceResetTests(MockThingsTestCase):
         self.assertEqual(serve.reset_sequence({"id": "b2"}), {"ok": False, "write_failed": True})
 
     def test_refused_requests(self) -> None:
-        for body, message in (({"id": "task1"}, "isn't in a Sequential or Next Up project"),
+        for body, message in (({"id": "task1"}, "isn't in a sequential project"),
                               ({"id": "nosuch"}, "Task not found")):
             with self.subTest(body=body), self.assertRaises(serve.ApiError) as raised:
                 serve.reset_sequence(body)
@@ -624,6 +690,24 @@ class SettingsApiTests(MockThingsTestCase):
         self.assertEqual(response["settings"]["names"]["P2"], "To Do")
         self.assertEqual((response["settings"]["auto_p1"], response["settings"]["default_priority"]), (True, "P2"))
         self.assertEqual(response["missing_tags"], ["P2", "P3", "P4", "P5"])
+        self.assertEqual((response["settings"]["sequence_tags"], response["missing_sequence_tags"]), ([], []))
+
+    def test_sequence_tags_saved_and_checked_against_things(self) -> None:
+        self.add_tags("Sequential")
+        tags = [{"tag": "Sequential", "priority": "P2"}, {"tag": "Reading List", "priority": "P5"}]
+        response = self.save(sequence_tags=tags)
+        self.assertEqual(response["settings"]["sequence_tags"], tags)
+        self.assertEqual(response["missing_sequence_tags"], ["Reading List"])
+        self.assertEqual(load_settings(self.settings_path).sequence_tags, (("Sequential", "P2"), ("Reading List", "P5")))
+
+    def test_invalid_sequence_tags_refused(self) -> None:
+        for tags in ([{"tag": "", "priority": "P2"}], [{"tag": "A", "priority": "P2"}, {"tag": "A", "priority": "P3"}],
+                     [{"tag": "P3", "priority": "P2"}], [{"tag": "A", "priority": "P0"}]):
+            with self.subTest(tags=tags):
+                with self.assertRaises(serve.ApiError) as raised:
+                    self.save(sequence_tags=tags)
+                self.assertEqual(raised.exception.status, 400)
+        self.assertFalse(os.path.exists(self.settings_path))
 
     def test_saved_names_label_today(self) -> None:
         names = dict(serve.settings_response()["settings"]["names"], P2="Doing", P5="Later")

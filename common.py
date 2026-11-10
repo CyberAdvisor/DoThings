@@ -4,9 +4,13 @@ Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file,
 the user's settings file and the auth token.
 
-Version: 1.6.0
+Version: 1.7.0
 
 Change log:
+- v1.7.0 (2026-11-10): Every task read carries its project's tags
+  (Task.project_tags); read_sequential_projects takes the tags listed in
+  Settings; missing_tags checks any tag names; the project reads and the
+  things:///update-project write are removed (Do Things never changes projects).
 - v1.6.0 (2026-11-10): settings.json (SETTINGS_PATH) with load_settings and
   save_settings; P5 search derived from PRIORITIES.
 - v1.5.0 (2026-11-08): move_to_trash moves a to-do to Things' Trash with
@@ -50,12 +54,8 @@ from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optiona
 
 from priority_check import (
     DEFAULT_SETTINGS,
-    NEXT_UP_TAG,
     PRIORITIES,
-    SEQUENCE_TAGS,
-    SEQUENTIAL_TAG,
     Change,
-    ProjectChange,
     Settings,
     Task,
     parse_settings,
@@ -214,23 +214,10 @@ def open_things_db(path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def _project_has_tag(tag: str) -> str:
-    """Return SQL that is true when the to-do's project (directly or via its heading) has `tag`.
-
-    `tag` is one of this module's own tag constants, never user input; quotes
-    are doubled anyway so the literal stays valid SQL.
-    """
-    literal = "'" + tag.replace("'", "''") + "'"
-    return (
-        "EXISTS (SELECT 1 FROM TMTaskTag pt JOIN TMTag pg ON pg.uuid = pt.tags "
-        f"WHERE pt.tasks = COALESCE(t.project, h.project) AND pg.title = {literal})"
-    )
-
-
 # Columns shared by every task query. Tags are concatenated with the ASCII unit
-# separator (char 31) because tag names may contain commas. `next_up` marks a
-# to-do of a project tagged Next Up and not Sequential (tagged both, it is
-# Sequential); refresh rule 3 makes such a to-do P4.
+# separator (char 31) because tag names may contain commas, both the to-do's
+# own and its project's (directly or via its heading), which decide whether it
+# belongs to a sequential project (priority_check.sequence_priority).
 _TASK_SELECT = f"""
 SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.stopDate, t.reminderTime,
        COALESCE(t.project, h.project, t.area) AS list_id, t.heading AS heading_id,
@@ -238,7 +225,9 @@ SELECT t.uuid, t.title, t.notes, t.start, t.startDate, t.deadline, t.status, t.s
        t.rt1_repeatingTemplate IS NOT NULL AS repeating,
        EXISTS (SELECT 1 FROM TMChecklistItem ci WHERE ci.task = t.uuid) AS has_checklist,
        COALESCE(p.title, hp.title, a.title, ha.title, '') AS context,
-       {_project_has_tag(NEXT_UP_TAG)} AND NOT {_project_has_tag(SEQUENTIAL_TAG)} AS next_up,
+       (SELECT group_concat(pg.title, char(31))
+          FROM TMTaskTag pt JOIN TMTag pg ON pg.uuid = pt.tags
+         WHERE pt.tasks = COALESCE(t.project, h.project)) AS project_tag_titles,
        (SELECT group_concat(tg.title, char(31))
           FROM TMTaskTag tt JOIN TMTag tg ON tg.uuid = tt.tags
          WHERE tt.tasks = t.uuid) AS tag_titles
@@ -284,7 +273,7 @@ def _row_to_task(row: sqlite3.Row) -> Task:
         project_rank=_project_rank(row["heading_id"], row["heading_index"], row["task_index"]),
         repeating=bool(row["repeating"]),
         has_checklist=bool(row["has_checklist"]),
-        next_up=bool(row["next_up"]),
+        project_tags=_split_tags(row["project_tag_titles"]),
         reminder=unpack_things_time(row["reminderTime"]),
     )
 
@@ -343,70 +332,35 @@ def read_task(conn: sqlite3.Connection, task_id: str) -> Optional[Task]:
     return _row_to_task(row) if row else None
 
 
-# Placeholders for the sequence tags (Sequential, Next Up) in an SQL IN list.
-_SEQUENCE_TAG_PLACEHOLDERS = ", ".join("?" for _ in SEQUENCE_TAGS)
+def read_sequential_projects(conn: sqlite3.Connection, tags: List[str]) -> Dict[str, List[Task]]:
+    """Return {project id: its open to-dos} for every open project with one of `tags`.
 
-
-def read_sequential_projects(conn: sqlite3.Connection) -> Dict[str, List[Task]]:
-    """Return {project id: its open to-dos} for every open project tagged Sequential or Next Up.
-
-    Covers each whole project (not only Today), so the sequence can be worked
-    out; to-dos under closed headings are left out.
+    `tags` are the sequential-project tags listed in Settings (none: no
+    projects). Covers each whole project (not only Today), so the sequence can
+    be worked out; to-dos under closed headings are left out.
     """
+    if not tags:
+        return {}
+    marks = ", ".join("?" for _ in tags)
     sequential = (
         "EXISTS (SELECT 1 FROM TMTaskTag st JOIN TMTag sg ON sg.uuid = st.tags "
-        f"WHERE st.tasks = COALESCE(t.project, h.project) AND sg.title IN ({_SEQUENCE_TAG_PLACEHOLDERS}))"
+        f"WHERE st.tasks = COALESCE(t.project, h.project) AND sg.title IN ({marks}))"
     )
     open_parents = (
         f"COALESCE(p.status, {STATUS_OPEN}) = {STATUS_OPEN} AND COALESCE(h.status, {STATUS_OPEN}) = {STATUS_OPEN} "
         f"AND COALESCE(hp.status, {STATUS_OPEN}) = {STATUS_OPEN}"
     )
     projects: Dict[str, List[Task]] = {}
-    rows = conn.execute(
-        f"{_TASK_SELECT} AND t.status = {STATUS_OPEN} AND {open_parents} AND {sequential}", SEQUENCE_TAGS
-    )
+    rows = conn.execute(f"{_TASK_SELECT} AND t.status = {STATUS_OPEN} AND {open_parents} AND {sequential}", tags)
     for row in rows:
         task = _row_to_task(row)
         projects.setdefault(task.project_id, []).append(task)
     return projects
 
 
-def _project_tags_query(where: str) -> str:
-    """Return a query for (uuid, tag_titles) of open, untrashed projects matching `where`.
-
-    Tags are joined with the ASCII unit separator, as in _TASK_SELECT.
-    """
-    return (
-        "SELECT p.uuid, (SELECT group_concat(tg.title, char(31)) FROM TMTaskTag tt "
-        "JOIN TMTag tg ON tg.uuid = tt.tags WHERE tt.tasks = p.uuid) AS tag_titles "
-        f"FROM TMTask p WHERE p.type = {TYPE_PROJECT} AND p.status = {STATUS_OPEN} AND p.trashed = 0 "
-        f"AND {where}"
-    )
-
-
 def _split_tags(tag_titles: Optional[str]) -> List[str]:
     """Split a unit-separator-joined tag list from a query; None means no tags."""
     return tag_titles.split(chr(31)) if tag_titles else []
-
-
-def read_sequence_project_tags(conn: sqlite3.Connection) -> Dict[str, List[str]]:
-    """Return {project id: its tags} for every open project tagged Sequential or Next Up.
-
-    Unlike read_sequential_projects, projects with no open to-dos are included,
-    so a project tagged both can have Next Up removed even when it is empty.
-    """
-    where = (
-        "EXISTS (SELECT 1 FROM TMTaskTag st JOIN TMTag sg ON sg.uuid = st.tags "
-        f"WHERE st.tasks = p.uuid AND sg.title IN ({_SEQUENCE_TAG_PLACEHOLDERS}))"
-    )
-    rows = conn.execute(_project_tags_query(where), SEQUENCE_TAGS)
-    return {row["uuid"]: _split_tags(row["tag_titles"]) for row in rows}
-
-
-def read_project_tags(conn: sqlite3.Connection, project_id: str) -> Optional[List[str]]:
-    """Return an open, untrashed project's tags, or None if there is no such project."""
-    row = conn.execute(_project_tags_query("p.uuid = ?"), [project_id]).fetchone()
-    return _split_tags(row["tag_titles"]) if row else None
 
 
 def _completed_in_projects(conn: sqlite3.Connection, project_ids: Iterable[str]) -> List[sqlite3.Row]:
@@ -508,10 +462,15 @@ def read_raw_reminder_times(conn: sqlite3.Connection, task_ids: Iterable[str]) -
     return {row["uuid"]: row["reminderTime"] for row in rows}
 
 
+def missing_tags(conn: sqlite3.Connection, tags: Iterable[str]) -> List[str]:
+    """Return those of `tags` that do not exist in Things (exact names), in the given order."""
+    existing = {row["title"] for row in conn.execute("SELECT title FROM TMTag")}
+    return [tag for tag in tags if tag not in existing]
+
+
 def missing_priority_tags(conn: sqlite3.Connection) -> List[str]:
     """Return the P tags that do not exist in Things (the URL scheme ignores unknown tags)."""
-    existing = {row["title"] for row in conn.execute("SELECT title FROM TMTag")}
-    return [p for p in PRIORITIES if p not in existing]
+    return missing_tags(conn, PRIORITIES)
 
 
 # --- Things URL commands --------------------------------------------------
@@ -567,15 +526,6 @@ def build_update_url(change: Change, token: str) -> str:
     return _things_url("update", params)
 
 
-def build_update_project_url(change: ProjectChange, token: str) -> str:
-    """Build the things:///update-project URL that replaces a project's tags.
-
-    Raises ValueError if a tag contains a comma (see _tags_param).
-    """
-    params = {"id": change.project_id, "auth-token": token, "tags": _tags_param(change.tags)}
-    return _things_url("update-project", params)
-
-
 def build_show_url(target_id: str) -> str:
     """Build the things:///show URL that opens a task, or one of THINGS_LISTS, in Things."""
     return "things:///show?" + urllib.parse.urlencode({"id": target_id})
@@ -624,20 +574,6 @@ def apply_change(change: Change, token: str, db_path: str) -> bool:
 
     what = f"task {change.task_id}"
     return _send_and_confirm(lambda: _open_update_url(lambda: build_update_url(change, token), what),
-                             confirmed, what, db_path)
-
-
-def apply_project_change(change: ProjectChange, token: str, db_path: str) -> bool:
-    """Send a project tag change to Things and wait until the database confirms it.
-
-    Returns True only when the re-read project has exactly the new tags.
-    """
-    def confirmed(conn: sqlite3.Connection) -> bool:
-        tags = read_project_tags(conn, change.project_id)
-        return tags is not None and change.is_satisfied_by(tags)
-
-    what = f"project {change.project_id}"
-    return _send_and_confirm(lambda: _open_update_url(lambda: build_update_project_url(change, token), what),
                              confirmed, what, db_path)
 
 
@@ -710,7 +646,7 @@ def _send_and_confirm(
 ) -> bool:
     """Run `send`, then re-read the database until `confirmed` holds.
 
-    `what` names the task or project in log lines. Returns False (and logs) if
+    `what` names the task in log lines. Returns False (and logs) if
     sending fails or Things doesn't confirm in time.
     """
     if not send():

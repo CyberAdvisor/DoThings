@@ -3,9 +3,14 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.6.0
+  Version: 1.7.0
 
   Change log:
+  - v1.7.0 (2026-11-10): Settings › Sequential projects: a list of project
+    tags, each with a priority and whether it exists in Things; tags are added,
+    changed and removed in place and saved as changed. Today shows an amber
+    notice naming listed tags not found in Things, with a link to Settings.
+    Both Settings sections save through one shared copy of the settings.
   - v1.6.0 (2026-11-10): Settings › Priorities: a name for each of P1–P5
     (shown on Today's group headers and priority pills; an empty name shows
     the tag), whether each tag exists in Things, "Auto assign due and overdue
@@ -126,6 +131,13 @@
   .settings .help { color: var(--muted); font-size: 12px; margin: 0 0 0 24px; }
   .settings .option + .help.flush { margin-left: 0; }
   .settings input[type=checkbox] { width: 16px; height: 16px; margin: 0; }
+  .settings .srow { display: grid; grid-template-columns: minmax(0, 220px) 84px 150px 32px; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .settings .colh { color: var(--muted); font-size: 12px; font-weight: 600; }
+  .settings .empty { font-style: italic; }
+  .settings .remove { background: none; border: none; color: var(--muted); font-size: 18px; padding: 0; width: 32px; height: 32px; }
+  .settings .remove:hover { color: var(--text); }
+  .settings .add-tag { margin-top: 6px; }
+  .banner a { color: inherit; font-weight: 600; }
   /* Main area */
   main { flex: 1; overflow-y: auto; padding: 36px 48px 80px; }
   .content { max-width: 720px; margin: 0 auto; }
@@ -437,7 +449,7 @@ function renderSidebar() {
   const settings = el("div", "nav-item" + (state.view === "settings" ? " selected" : ""));
   settings.innerHTML = ICONS.settings; // Static icon markup only.
   settings.append(el("span", "", "Settings"));
-  settings.onclick = showSettings;
+  settings.onclick = () => showSettings();
   // The version opens the README on GitHub in a new tab.
   const version = el("a", "version", state.version ? `Do Things v${state.version}` : "");
   version.href = README_URL;
@@ -610,6 +622,9 @@ function renderBanners(content, data) {
         "Come back to this page. It checks again automatically.",
       ]));
   }
+  if (data.name === "today" && data.missing_sequence_tags && data.missing_sequence_tags.length) {
+    content.append(sequenceTagsBanner(data.missing_sequence_tags));
+  }
   if (data.refresh_paused) {
     const banner = stepsBanner(
       "Automatic updates are paused: Things didn't apply a change from Do Things. Check:", WRITE_FAILED_STEPS);
@@ -621,6 +636,30 @@ function renderBanners(content, data) {
     banner.append(retry, fix);
     content.append(banner);
   }
+}
+
+/**
+ * Build Today's amber notice for sequential-project tags (Settings) that
+ * aren't in Things. It stops nothing: only those tags' projects are skipped.
+ * Tag names are user data, so they are set as text.
+ */
+function sequenceTagsBanner(missing) {
+  const quoted = missing.map((tag) => `“${tag}”`);
+  const [kind, them, tags] = missing.length === 1 ? ["a tag", "it", "the tag"] : ["tags", "them", "the tags"];
+  const banner = el("div", "banner");
+  banner.setAttribute("role", "status");
+  const text = el("p", "",
+    `No ${kind} named ${quoted.join(" or ")} in Things, so no project uses ${them} and nothing is started for ${them}. ` +
+    `Create ${tags} in Things (Window › Tags), or change ${them} in `);
+  const link = el("a", "", "Settings › Sequential projects");
+  link.href = "#";
+  link.onclick = (event) => {
+    event.preventDefault();
+    showSettings("sequence-settings");
+  };
+  text.append(link, ".");
+  banner.append(text);
+  return banner;
 }
 
 /** Resume automatic updates after the checks above, and reload (which tries them once). */
@@ -1393,8 +1432,12 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
 }
 
-/** Show the Settings page: replace the auth token, choose the appearance, set up the priorities. */
-async function showSettings() {
+/**
+ * Show the Settings page: replace the auth token, choose the appearance, set
+ * up the priorities and the sequential-project tags. `scrollTo` is the id of
+ * a section to bring into view (from Today's notice), if any.
+ */
+async function showSettings(scrollTo) {
   state.view = "settings";
   state.edit = null; // Opening Settings closes an open editor without saving.
   renderSidebar();
@@ -1436,9 +1479,35 @@ async function showSettings() {
   page.append(seg);
 
   page.append(el("h2", "", "Priorities"));
-  if (data) page.append(prioritySettings(data));
-  else page.append(el("div", "banner", failure));
+  if (data) {
+    const store = settingsStore(data);
+    page.append(prioritySettings(data, store));
+    page.append(el("h2", "", "Sequential projects"));
+    page.append(sequenceSettings(data, store));
+  } else {
+    page.append(el("div", "banner", failure));
+  }
   content.append(page);
+  if (scrollTo && document.getElementById(scrollTo)) document.getElementById(scrollTo).scrollIntoView();
+}
+
+/**
+ * Hold the settings shown on the Settings page and save changes to them.
+ * Every section saves through it, so a change in one section never sends
+ * another's old values. `save` sends the whole set with `changes` applied
+ * (the server validates it) and returns the server's response, or throws
+ * with the server's message.
+ */
+function settingsStore(data) {
+  const store = {
+    current: data.settings,
+    async save(changes) {
+      const response = await api("/api/settings", { settings: { ...store.current, ...changes } });
+      store.current = response.settings;
+      return response;
+    },
+  };
+  return store;
 }
 
 // Steps shown in Settings for priority tags missing in Things.
@@ -1455,13 +1524,13 @@ const MISSING_TAG_STEPS = [
  * saved at once (the server validates it); a refused change is reported
  * below the section.
  */
-function prioritySettings(data) {
+function prioritySettings(data, store) {
   const section = el("div");
-  let current = data.settings;
+  const current = store.current;
   const message = el("div", "error");
   const save = async (changes) => {
     try {
-      current = (await api("/api/settings", { settings: { ...current, ...changes } })).settings;
+      await store.save(changes);
       message.textContent = "";
     } catch (error) {
       message.textContent = error.message;
@@ -1485,7 +1554,7 @@ function prioritySettings(data) {
     input.value = current.names[p];
     input.placeholder = "No name";
     input.maxLength = 40;
-    input.onchange = () => save({ names: { ...current.names, [p]: input.value } });
+    input.onchange = () => save({ names: { ...store.current.names, [p]: input.value } });
     const found = !missing.includes(p);
     row.append(label, input, el("span", found ? "found" : "missing", found ? "✓ In Things" : "Not found in Things"));
     section.append(row);
@@ -1508,8 +1577,114 @@ function prioritySettings(data) {
   const pickLabel = el("label", "", "Assign priority");
   pickLabel.htmlFor = pick.id;
   option.append(pickLabel, pick, el("span", "", "to new Today tasks"));
-  section.append(option, el("p", "help flush", "Tasks of Next Up projects get P4 instead."));
+  section.append(option, el("p", "help flush", "Tasks of sequential projects get their tag's priority instead."));
   section.append(message);
+  return section;
+}
+
+/**
+ * Build the Sequential projects settings: the project tags that make a
+ * project work one task at a time, each with the priority its tasks get and
+ * whether the tag exists in Things. Rows are added with + Add tag, and a new
+ * row is saved once its tag is typed; every change saves the whole list (the
+ * server refuses an empty tag, a tag listed twice and P1–P5). Rows are
+ * redrawn only when one is added or removed, so focus isn't lost while typing.
+ */
+function sequenceSettings(data, store) {
+  const section = el("div");
+  section.id = "sequence-settings";
+  section.append(el("p", "",
+    "Tag a project in Things with one of these tags and Do Things works through it one task at a time, " +
+    "in project order: it starts the first undated task, and the next one once that is done. " +
+    "Its tasks get the priority set beside the tag. A project with two of these tags uses the higher priority."));
+  const rowsBox = el("div");
+  const message = el("div", "error");
+  // The list as shown, including rows whose tag isn't typed yet (not saved).
+  let entries = store.current.sequence_tags.map((entry) => ({ ...entry }));
+  let missing = data.missing_sequence_tags;
+  let rows = []; // { entry, status } per shown row, to update the status after a save.
+
+  /**
+   * Show each row as found or missing in Things. A row not saved (yet) shows
+   * nothing: one with no tag, a refused one, or a repeat of an earlier row's
+   * tag (only the first row with a tag can be the saved one).
+   */
+  const showStatus = () => {
+    for (const row of rows) {
+      const first = rows.find((r) => r.entry.tag === row.entry.tag) === row;
+      const saved = first && store.current.sequence_tags.some((e) => e.tag === row.entry.tag);
+      const found = !missing.includes(row.entry.tag);
+      row.status.className = !saved || found ? "found" : "missing";
+      row.status.textContent = !saved ? "" : found ? "✓ In Things" : "Not found in Things";
+    }
+  };
+
+  /** Save every row with a tag (rows still being typed stay on the page) and update the statuses. */
+  const commit = async () => {
+    try {
+      const response = await store.save({ sequence_tags: entries.filter((e) => e.tag) });
+      missing = response.missing_sequence_tags;
+      message.textContent = "";
+    } catch (error) {
+      message.textContent = error.message;
+    }
+    showStatus();
+  };
+
+  const draw = () => {
+    rowsBox.replaceChildren();
+    rows = [];
+    if (!entries.length) {
+      rowsBox.append(el("p", "empty", "No tags yet. Add one to make projects work one task at a time."));
+      return;
+    }
+    const head = el("div", "srow");
+    head.append(el("span", "colh", "Project tag in Things"), el("span", "colh", "Priority"), el("span"), el("span"));
+    rowsBox.append(head);
+    entries.forEach((entry, index) => {
+      const row = el("div", "srow");
+      const input = el("input", "field");
+      input.value = entry.tag;
+      input.placeholder = "Tag name";
+      input.maxLength = 60;
+      input.setAttribute("aria-label", "Project tag");
+      input.onchange = () => {
+        entry.tag = input.value.trim();
+        input.value = entry.tag;
+        commit();
+      };
+      const pick = selectOf(data.priorities.map((p) => [p, p]), entry.priority);
+      pick.className = "field";
+      pick.setAttribute("aria-label", "Priority");
+      pick.onchange = () => {
+        entry.priority = pick.value;
+        if (entry.tag) commit(); // A row without a tag isn't saved yet.
+      };
+      const status = el("span");
+      const remove = el("button", "remove", "×");
+      remove.type = "button";
+      remove.setAttribute("aria-label", entry.tag ? `Remove ${entry.tag}` : "Remove row");
+      remove.onclick = () => {
+        entries.splice(index, 1);
+        draw();
+        commit();
+      };
+      row.append(input, pick, status, remove);
+      rowsBox.append(row);
+      rows.push({ entry, status });
+    });
+    showStatus();
+  };
+
+  const add = el("button", "secondary add-tag", "+ Add tag");
+  add.type = "button";
+  add.onclick = () => {
+    entries.push({ tag: "", priority: store.current.default_priority });
+    draw();
+    rowsBox.querySelector(".srow:last-child input").focus();
+  };
+  draw();
+  section.append(rowsBox, add, message);
   return section;
 }
 
