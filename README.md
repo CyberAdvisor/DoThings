@@ -130,6 +130,13 @@ It changes nothing in Things or in Do Things. It shows:
 - which sequential-project tags listed in Settings are missing in Things;
 - each sequential project's tag, priority and task in progress.
 
+`debug_calendar.py` checks, also without changing anything, whether Do Things can read today's calendar events (for a possible calendar section in Today, as in Things):
+```
+cd ~/Documents/Projects/DoThings
+/Library/Developer/CommandLineTools/usr/bin/python3 debug_calendar.py --hide-titles
+```
+The first time, macOS may ask whether Terminal may access your calendars. It shows whether access is granted, the calendars it sees, today's events and how long reading them took. Add `--applescript` to also time reading through the Calendar app; leave out `--hide-titles` to see event titles.
+
 ## 6. Project location and development workflow (clone to change Do Things)
 If you want Do Things to work differently, work from a clone instead of a download.
 
@@ -195,11 +202,13 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `priority_check.py` | The priority, move and sequential-project rules, settings validation, grouping and ordering (pure logic) |
 | `serve.py` | Entry point: local server and JSON API |
 | `debug_things.py` | Read-only diagnostic |
+| `debug_calendar.py` | Read-only check that today's calendar events can be read (EventKit, optional AppleScript comparison) |
 | `index.html` | The page: sidebar, task lists, drag-and-drop, editor, settings and token setup |
 | `screenshots/today.png` | The Today screenshot shown in this guide (sample data) |
 | `test_priority_check.py` | Tests for the rules |
 | `test_common.py` | Tests for token handling, dates, time zone, URLs, saved files and database queries |
 | `test_serve.py` | Tests for the server against a mock Things database |
+| `test_debug_calendar.py` | Tests for the calendar diagnostic's report (osascript mocked) |
 | `errors.log`, `run.log` | Runtime logs (untracked). `errors.log` is capped at 1 MB, with the previous one kept as `errors.log.1` |
 | `task_order.json` | Saved order within each priority; tasks that leave Today are dropped from it (untracked) |
 | `sequence_pulls.json` | The task Do Things started in each sequential project, so it can be undone (untracked) |

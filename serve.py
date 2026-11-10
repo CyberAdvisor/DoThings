@@ -8,9 +8,10 @@ and stores the Things auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential projects are the ones with a tag listed in
   Settings (step_sequences, sequence_labels and Reset other tasks take the
   settings); records of projects not stepped are kept but not acted on; the

@@ -4,9 +4,10 @@ Holds file paths, version loading, logging, read-only access to the Things
 database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file,
 the user's settings file and the auth token.
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Every task read carries its project's tags
   (Task.project_tags); read_sequential_projects takes the tags listed in
   Settings; missing_tags checks any tag names; the project reads and the

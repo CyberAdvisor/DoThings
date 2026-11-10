@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Tests for read_sequential_projects with the listed tags,
   task reads carrying their project's tags, and missing_tags; the project tag
   reads, update-project URL and project change tests removed.

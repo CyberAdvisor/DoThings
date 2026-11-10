@@ -9,9 +9,10 @@ display. It also decides which priority a sequential project's tasks get
 starts next, and validates the user's settings (priority names, options and
 sequential-project tags).
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential-project tags come from Settings
   (Settings.sequence_tags, each with a priority); sequence_priority replaces
   Task.next_up and the fixed Sequential and Next Up tags (Task.project_tags);

@@ -67,6 +67,11 @@ Without the start-date step, clearing the deadline of a deadline-only task would
 - The P searches are Today (`_TODAY_CLAUSE`) plus the tag, so a tagged task starting later isn't listed until it starts (v0.1.24). Overdue is any open task with a deadline before today.
 - Do Things only queries Today and the searches (`APP_LISTS`). Inbox, Upcoming, Anytime, Someday and Logbook open in Things with `things:///show?id=<list>` (no token needed).
 
+## Calendar events (exploring, v1.7.1)
+- Michael asked (2026-11-10) for calendar events in Today as Things shows them. Things doesn't store events in its database; it reads macOS Calendar live. Planned access: EventKit from JavaScript for Automation (`osascript -l JavaScript`), standard library only; fallbacks: AppleScript through the Calendar app (slow, misses repeating events that started earlier) or Calendar's own database (undocumented, likely needs Full Disk Access).
+- `debug_calendar.py` (v1.7.1, read-only) checks this on the Mac: authorization status (EKAuthorizationStatus 0 not determined, 1 restricted, 2 denied, 3 full access, 4 write only), requesting access if not determined (`requestFullAccessToEventsWithCompletion` on macOS 14+, else `requestAccessToEntityTypeCompletion`), calendars with colors, today's events (EventKit expands repeating events) and timings. Untested on a real Mac until Michael runs it; whether macOS grants calendar access to osascript run from Terminal is the open question.
+- Nothing is built in the app yet. The design (events above the priority groups, all-day first, calendar colors, display only, Settings to choose calendars) is to be mocked up once the diagnostic works.
+
 ## Things URL scheme gotchas
 - `tags=` replaces all tags, so always send the full list. Tags are comma-separated, and a tag containing a comma cannot be written, so it is refused.
 - Tags that don't exist in Things are silently ignored. That's why the P1–P5 tags must exist (the UI warns) and why every write is confirmed by re-reading the database.

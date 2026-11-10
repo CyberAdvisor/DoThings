@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Sequential projects come from the tags listed in the
   saved settings (use_sequence_tags): tests for a tag's priority, two listed
   tags on one project (higher priority, project never changed), no tags

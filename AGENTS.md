@@ -20,9 +20,10 @@ Guide for contributors and AI agents working on this repository.
 | `priority_check.py` | Pure rules and the `Task`, `Change`, `Settings` and `TaskEdit` models: `required_priority`, `plan_refresh`, `plan_move`, `plan_edit`, `plan_completion`, sequential projects (`sequence_priority`, `plan_sequence`, `plan_sequence_undo`, `plan_sequence_reset`), `predict` and `place_in_list` (an edit's result and where it is listed), grouping, ordering (`update_order`, `prune_order`) and counts |
 | `serve.py` | Entry point: HTTP handler, request checks, API routes (lists, task detail, move, order, complete, trash, edit, edit preview, sequence reset and its preview, refresh retry, open in Things, settings, token), refresh pause, row JSON |
 | `debug_things.py` | Read-only diagnostic entry point |
+| `debug_calendar.py` | Read-only calendar diagnostic: reads today's events through EventKit from JavaScript for Automation (`osascript -l JavaScript`, script on stdin), with an optional AppleScript (Calendar app) comparison; never writes |
 | `index.html` | Page: sidebar with counts, Hide Completed, Hide Empty and Settings; Things-style rows with colored priority pills in lists that mix priorities; drag-and-drop; checkboxes; inline editor with date picker driven by the edit preview; background save queue; paused-updates bar and Today's missing-sequential-tag notice; Settings (token, appearance, priorities, sequential projects) and token setup |
 | `screenshots/today.png` | README screenshot of Today, taken from the running app with sample data (deviation: the only non-root file besides the release workflow) |
-| `test_priority_check.py`, `test_common.py`, `test_serve.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things) |
+| `test_priority_check.py`, `test_common.py`, `test_serve.py`, `test_debug_calendar.py` | Unit tests (`test_common.py` builds a mock Things database; `test_serve.py` reuses it and mocks Things; `test_debug_calendar.py` mocks osascript) |
 | `README.md`, `CHANGELOG.md`, `CLAUDE_CONTEXT.md`, `LICENSE`, `VERSION`, `.gitignore`, `requirements.txt` | Docs and project metadata |
 | `.github/workflows/release.yml` | Creates the `vX.Y.Z` tag and GitHub release when a new `VERSION` reaches `main` |
 
@@ -62,12 +63,12 @@ Do not weaken any of these without explicit approval:
 ## Verification
 Run all of these before every commit:
 ```
-PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py serve.py debug_things.py test_common.py test_priority_check.py test_serve.py
+PYTHONPYCACHEPREFIX=/tmp/dothings-pycache python3 -m py_compile common.py priority_check.py serve.py debug_things.py debug_calendar.py test_common.py test_priority_check.py test_serve.py test_debug_calendar.py
 python3 -m unittest discover -p 'test_*.py'
 git diff --check
 git status --short
 ```
-- Do not run anything that sends writes to the user's real Things as verification unless the user explicitly authorizes it. `debug_things.py` is read-only and safe to run.
+- Do not run anything that sends writes to the user's real Things as verification unless the user explicitly authorizes it. `debug_things.py` and `debug_calendar.py` are read-only and safe to run (`debug_calendar.py` only on a Mac; its JavaScript can be syntax-checked elsewhere with `node --check`).
 - To exercise the server without real Things, point `HOME` at a temporary folder containing a mock database (see `test_common.py` for the schema) and put a stub `open` command first on `PATH`.
 
 Code quality check before every commit:

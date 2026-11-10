@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.7.0
+Version: 1.7.1
 
 Change log:
+- v1.7.1 (2026-11-10): Synchronized module version metadata.
 - v1.7.0 (2026-11-10): Tests for sequential-project tags in the settings
   (parse_settings, sequence_priority, rule 3 with a tag's priority, two listed
   tags); Next Up kind and project tag change tests removed.
