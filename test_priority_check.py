@@ -1,8 +1,9 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Tests for the view order keys (is_order_key,
   update_order per view, prune_order dropping empty view lists); place tests
   use view_check.place_in_view.

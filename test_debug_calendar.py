@@ -3,9 +3,10 @@
 The calendar script is replaced with mocks, so these run anywhere; the
 JavaScript for Automation itself can only run on a Mac.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Synchronized module version metadata.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.
 - v1.9.1 (2026-11-10): Synchronized module version metadata.

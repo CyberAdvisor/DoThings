@@ -9,9 +9,10 @@ and each Today task's reminder time as stored by Things and as Do Things reads i
 and Things' projects and areas in the sidebar order Today's Project view uses.
 It never writes to Things or to any Do Things file.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Synchronized module version metadata.
 - v2.0.0 (2026-11-10): Prints Things' projects and areas in sidebar order
   (Today's Project view group order), to compare with Things' sidebar.
 - v1.9.2 (2026-11-10): Synchronized module version metadata.

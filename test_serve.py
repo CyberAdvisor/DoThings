@@ -3,9 +3,10 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Project view groups have no gray note.
 - v2.0.0 (2026-11-10): Tests for Today's views, the tag filter and /api/drop
   (moves between priorities and projects, refusals, filtered reorders, the
   edit preview's place per view); move tests use /api/drop.
@@ -1248,8 +1249,8 @@ class TodayViewTests(MockThingsTestCase):
         )
         self.assertEqual(
             [(g["label"], g["note"], g["list_id"], g["takes_moves"]) for g in response["groups"]],
-            [("Vacation", "Project", "vac", True), ("Home Chores", "Area", "home", True),
-             ("Books to read", "Project · Home Chores", "books", True), ("No project", "", None, False)],
+            [("Vacation", "", "vac", True), ("Home Chores", "", "home", True),
+             ("Books to read", "", "books", True), ("No project", "", None, False)],
         )
         row = response["groups"][0]["tasks"][0]
         self.assertEqual((row["context"], row["priority"], row["tags"]), ("", "P2", ["Calls"]))

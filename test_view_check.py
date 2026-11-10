@@ -1,8 +1,9 @@
 """Tests for Today's views and the tag bar in view_check.py.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Project view headers have no gray note.
 - v2.0.0 (2026-11-10): New. Priority, Project and All views, the tag bar
   and drops seen through the tag filter.
 """
@@ -137,16 +138,9 @@ class ProjectViewTests(unittest.TestCase):
             [g.key for g in groups],
             ["project:vac", "project:home", "project:books", "project:gone", "project:none"],
         )
-        self.assertEqual(
-            [(g.label, g.note) for g in groups],
-            [
-                ("Vacation", "Project"),
-                ("Home Chores", "Area"),
-                ("Books to read", "Project · Home Chores"),
-                ("Old project", "Project"),  # Not in the sidebar read: after the listed ones.
-                ("No project", ""),
-            ],
-        )
+        # Not in the sidebar read: "Old project" comes after the listed ones.
+        self.assertEqual([g.label for g in groups], ["Vacation", "Home Chores", "Books to read", "Old project", "No project"])
+        self.assertEqual({g.note for g in groups}, {""})  # Headers show only the name.
         self.assertEqual([g.list_id for g in groups], ["vac", "home", "books", "gone", None])
 
     def test_no_project_takes_no_moves(self) -> None:

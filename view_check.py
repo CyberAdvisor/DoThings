@@ -6,9 +6,11 @@ dragging in that view, lists the tags for the tag bar and filters by the
 chosen tag, says where a task appears in a view (the edit preview), and works
 out a group's full order after a drop seen through the tag filter.
 
-Version: 2.0.0
+Version: 2.0.1
 
 Change log:
+- v2.0.1 (2026-11-10): Project view headers show only the project or area
+  name (no gray "Project", "Area" or area name after it).
 - v2.0.0 (2026-11-10): New. Priority, Project and All views of Today and the
   tag bar.
 """
@@ -60,7 +62,8 @@ class ViewGroup:
 
     `key` names the group and its saved order (task_order.json). `label` is
     the header ("" for All's single, unheaded group, or a priority with no
-    name), `note` the gray text after it. `list_id` is the project or area a
+    name), `note` the gray text after it (a named priority's tag; empty in
+    the Project view, whose headers show only the name). `list_id` is the project or area a
     Project view group stands for (None otherwise). `takes_moves` is whether
     a task from another group may be dropped here.
     """
@@ -134,7 +137,8 @@ def project_groups(tasks: List[Task], order: Dict[str, List[str]], entries: List
     `entries` are Things' projects and areas in sidebar order. A task's
     project or area missing from them (not expected) gets a group after the
     listed ones, by title. Tasks keep their Today order (project order within
-    a project) until dragged; completed tasks go last.
+    a project) until dragged; completed tasks go last. Headers show only the
+    project or area name (Michael's choice: the kind and area add nothing).
     """
     rank = {entry.id: i for i, entry in enumerate(entries)}
     by_id = {entry.id: entry for entry in entries}
@@ -158,10 +162,7 @@ def project_groups(tasks: List[Task], order: Dict[str, List[str]], entries: List
             continue
         entry = by_id.get(list_id)
         label = entry.title if entry else ordered[0].context
-        note = "Area" if entry and entry.kind == "area" else "Project"
-        if entry and entry.area:
-            note += f" · {entry.area}"
-        groups.append(ViewGroup(key=key, label=label, note=note, tasks=ordered, list_id=list_id))
+        groups.append(ViewGroup(key=key, label=label, note="", tasks=ordered, list_id=list_id))
     return groups
 
 
