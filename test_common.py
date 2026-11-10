@@ -3,9 +3,10 @@
 Database tests run against a small SQLite file built with the parts of the
 Things schema that Do Things reads, so no real Things data is touched.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): Tests for the settings file; P5 among the missing tags.
 - v1.5.0 (2026-11-08): Tests for the trash AppleScript command and move_to_trash.
 - v1.4.0 (2026-11-08): Test that task reads carry the reminder time.
 - v1.3.1 (2026-11-08): Tests for the reminder time format and the raw reminder read.
@@ -58,6 +59,7 @@ from common import (
     is_valid_task_id,
     load_order,
     load_pulls,
+    load_settings,
     load_token,
     missing_priority_tags,
     move_to_trash,
@@ -76,6 +78,7 @@ from common import (
     run_trash_script,
     save_order,
     save_pulls,
+    save_settings,
     save_token,
     start_of_day,
     today_local,
@@ -83,7 +86,7 @@ from common import (
     unpack_things_time,
     validate_token,
 )
-from priority_check import Change, ProjectChange
+from priority_check import DEFAULT_SETTINGS, Change, ProjectChange, Settings
 
 TODAY = date(2026, 11, 7)
 
@@ -346,6 +349,24 @@ class OrderFileTests(unittest.TestCase):
             # assertLogs captures the error so tests never write to errors.log.
             with self.assertLogs("dothings", level="ERROR"):
                 self.assertEqual(load_order(path), {})
+
+
+class SettingsFileTests(unittest.TestCase):
+    """The user's settings file."""
+
+    def test_round_trip_and_bad_files(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "settings.json")
+            self.assertEqual(load_settings(path), DEFAULT_SETTINGS)  # No file yet.
+            settings = Settings(names=dict(DEFAULT_SETTINGS.names, P5="Later"), auto_p1=False, default_priority="P3")
+            save_settings(settings, path)
+            self.assertEqual(load_settings(path), settings)
+            for content in ("{not json", '{"default_priority": "P9"}'):
+                with open(path, "w", encoding="utf-8") as handle:
+                    handle.write(content)
+                # Logged and ignored: the defaults keep the rules working.
+                with self.subTest(content=content), self.assertLogs("dothings", level="ERROR"):
+                    self.assertEqual(load_settings(path), DEFAULT_SETTINGS)
 
 
 class PullsFileTests(unittest.TestCase):
@@ -704,7 +725,7 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(task.context, "Project")
             self.assertEqual(read_task(conn, "today2").context, "Work")
             self.assertIsNone(read_task(conn, "missing"))
-            self.assertEqual(missing_priority_tags(conn), ["P3", "P4"])
+            self.assertEqual(missing_priority_tags(conn), ["P3", "P4", "P5"])
 
     def test_database_is_read_only(self) -> None:
         with open_things_db(self.path) as conn, self.assertRaises(sqlite3.OperationalError):

@@ -1,8 +1,10 @@
 """Tests for the priority rules in priority_check.py.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): Tests for P5 and the settings (parse_settings,
+  auto-assign P1 off, default priority for new Today tasks).
 - v1.5.0 (2026-11-08): Synchronized module version metadata.
 - v1.4.0 (2026-11-08): Synchronized module version metadata.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
@@ -18,13 +20,16 @@ Change log:
 """
 
 import unittest
+from dataclasses import replace
 from datetime import date, timedelta
 
 from priority_check import (
+    DEFAULT_SETTINGS,
     NEXT_UP_TAG,
     SEQUENTIAL_TAG,
     Change,
     ProjectChange,
+    Settings,
     Task,
     TaskEdit,
     apply_order,
@@ -35,6 +40,7 @@ from priority_check import (
     group_today,
     in_project_order,
     in_today,
+    parse_settings,
     place_in_list,
     plan_completion,
     plan_edit,
@@ -229,6 +235,76 @@ class SequenceTests(unittest.TestCase):
     def test_nothing_to_do(self) -> None:
         self.assertIsNone(plan_sequence([], TODAY))
         self.assertIsNone(plan_sequence([in_project("due", "S", (0, 0, 1), deadline=TODAY)], TODAY))
+
+
+class P5Tests(unittest.TestCase):
+    """P5: the lowest priority, treated like P2-P4."""
+
+    def test_p5_is_lowest_and_moves_keep_the_deadline(self) -> None:
+        self.assertEqual(required_priority(make_task(tags=["P5", "P4"]), TODAY), "P4")
+        change = plan_move(make_task(tags=["P2"], deadline=TOMORROW, start_date=TODAY), "P5", TODAY)
+        self.assertEqual((change.tags, change.clear_deadline, change.set_deadline), (["P5"], False, None))
+        groups = group_today([make_task(tags=["P5"], start_date=TODAY)], {}, TODAY)
+        self.assertEqual([t.uuid for t in groups["P5"]], ["A1"])
+
+
+class SettingsTests(unittest.TestCase):
+    """parse_settings validates the settings file and the Settings page's saves."""
+
+    def test_defaults_and_partial(self) -> None:
+        self.assertEqual(parse_settings({}), DEFAULT_SETTINGS)
+        self.assertEqual(DEFAULT_SETTINGS.names["P5"], "")
+        settings = parse_settings({"names": {"P5": "  Someday-ish "}, "default_priority": "P3"})
+        self.assertEqual((settings.names["P5"], settings.names["P1"]), ("Someday-ish", "Due Today"))
+        self.assertEqual((settings.auto_p1, settings.default_priority), (True, "P3"))
+        self.assertEqual(parse_settings(settings.to_json()), settings)  # Round trip.
+
+    def test_invalid_rejected(self) -> None:
+        for raw in ([], {"names": []}, {"names": {"P6": "x"}}, {"names": {"P1": 3}}, {"names": {"P1": "a\nb"}},
+                    {"names": {"P1": "x" * 41}}, {"auto_p1": "yes"}, {"default_priority": "P6"}):
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                parse_settings(raw)
+
+
+class AutoP1OffTests(unittest.TestCase):
+    """With "Auto assign due/overdue tasks P1" off, due tasks keep their priority and moves leave deadlines alone."""
+
+    OFF = Settings(auto_p1=False)
+
+    def test_due_task_keeps_its_priority(self) -> None:
+        task = make_task(tags=["P3"], deadline=YESTERDAY, start_date=TODAY)
+        self.assertEqual(required_priority(task, TODAY, self.OFF), "P3")
+        self.assertIsNone(plan_refresh(task, TODAY, self.OFF))
+        self.assertEqual(required_priority(make_task(deadline=TODAY), TODAY, self.OFF), "P2")  # Untagged: the default.
+
+    def test_due_undated_task_still_gets_a_start_date(self) -> None:
+        change = plan_refresh(make_task(tags=["P2"], deadline=TODAY), TODAY, self.OFF)
+        self.assertEqual((change.tags, change.set_start_date), (None, TODAY))
+
+    def test_moves_leave_the_deadline_alone(self) -> None:
+        change = plan_move(make_task(tags=["P2"], start_date=TODAY), "P1", TODAY, self.OFF)
+        self.assertEqual((change.tags, change.set_deadline), (["P1"], None))
+        change = plan_move(make_task(tags=["P1"], deadline=YESTERDAY), "P3", TODAY, self.OFF)
+        self.assertEqual((change.tags, change.clear_deadline, change.set_start_date), (["P3"], False, None))
+
+    def test_edit_preview_and_placement(self) -> None:
+        task = make_task(tags=["P2"], start_date=TODAY)
+        change = plan_edit(task, TaskEdit(deadline=YESTERDAY), TODAY, self.OFF)
+        after = predict(task, change, TODAY, self.OFF)
+        self.assertEqual((after.deadline, current_priority(after.tags)), (YESTERDAY, "P2"))
+        self.assertEqual(place_in_list(after, "today", TODAY, self.OFF), "P2")
+        self.assertEqual(place_in_list(after, "today", TODAY), "P1")  # With it on, the same task is P1.
+
+
+class DefaultPriorityTests(unittest.TestCase):
+    """Untagged Today tasks get the default priority from Settings; Next Up tasks still get P4."""
+
+    def test_default_priority(self) -> None:
+        settings = Settings(default_priority="P3")
+        self.assertEqual(plan_refresh(make_task(tags=["Home"], start_date=TODAY), TODAY, settings).tags, ["Home", "P3"])
+        next_up = replace(make_task(start_date=TODAY), next_up=True)
+        self.assertEqual(required_priority(next_up, TODAY, settings), "P4")
+        self.assertEqual(required_priority(make_task(tags=["P2"], start_date=TODAY), TODAY, settings), "P2")
 
 
 class NextUpTests(unittest.TestCase):
@@ -535,7 +611,7 @@ class PlanMoveTests(unittest.TestCase):
 
     def test_unknown_destination_rejected(self) -> None:
         with self.assertRaises(ValueError):
-            plan_move(make_task(), "P5", TODAY)
+            plan_move(make_task(), "P6", TODAY)
 
 
 class ChangeConfirmationTests(unittest.TestCase):
@@ -585,7 +661,7 @@ class OrderingTests(unittest.TestCase):
     def test_update_order_removes_ids_from_other_groups(self) -> None:
         order = {"P1": ["A", "B"], "P2": ["C"]}
         self.assertEqual(
-            update_order(order, "P2", ["B", "C"]), {"P1": ["A"], "P2": ["B", "C"], "P3": [], "P4": []}
+            update_order(order, "P2", ["B", "C"]), {"P1": ["A"], "P2": ["B", "C"], "P3": [], "P4": [], "P5": []}
         )
 
     def test_update_order_rejects_unknown_priority(self) -> None:
@@ -650,7 +726,7 @@ class PredictTests(unittest.TestCase):
 
     def test_prune_order(self) -> None:
         order = {"P1": ["a", "gone"], "P3": ["b"]}
-        self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"], "P4": []})
+        self.assertEqual(prune_order(order, ["a", "b"]), {"P1": ["a"], "P2": [], "P3": ["b"], "P4": [], "P5": []})
 
 
 if __name__ == "__main__":

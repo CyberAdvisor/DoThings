@@ -3,9 +3,15 @@
   Do Things page. Served by serve.py; all rules and data live on the server,
   this page only renders lists and sends actions.
 
-  Version: 1.5.0
+  Version: 1.6.0
 
   Change log:
+  - v1.6.0 (2026-11-10): Settings › Priorities: a name for each of P1–P5
+    (shown on Today's group headers and priority pills; an empty name shows
+    the tag), whether each tag exists in Things, "Auto assign due and overdue
+    tasks P1" and the priority for new Today tasks; saved as changed. Rows in
+    lists that mix priorities show the priority as a colored pill with its
+    name. Fifth Today group (P5). Sidebar tagline is "Turning Plans Into Action".
   - v1.5.0 (2026-11-08): "Move to Trash" in the editor of an open task asks for
     confirmation in the card, then moves the task to Things' Trash; a failure
     lists the Automation permission checks.
@@ -40,12 +46,19 @@
     --line: #e6e6e9; --hover: #eef0f4; --selected: #dfe3ea; --accent: #2f6fe4;
     --red: #e5484d; --pill: #eceef1; --banner: #fff4e5; --banner-text: #8a4b00;
     --error: #fdecec; --error-text: #b42318;
+    /* Priority pills: text/border color, then the light fill. */
+    --p1: #d93036; --p1-bg: rgba(217, 48, 54, .12); --p2: #2f6fe4; --p2-bg: rgba(47, 111, 228, .12);
+    --p3: #a86400; --p3-bg: rgba(214, 140, 20, .14); --p4: #13867a; --p4-bg: rgba(19, 134, 122, .12);
+    --p5: #7b4fd6; --p5-bg: rgba(123, 79, 214, .12);
   }
   :root[data-theme="dark"] {
     --bg: #1e1f22; --sidebar: #26272b; --text: #ececee; --muted: #8e8e93;
     --line: #34353a; --hover: #2e3035; --selected: #3a3d44; --accent: #5b8cff;
     --red: #ff6369; --pill: #34363b; --banner: #3a2e1c; --banner-text: #ffc879;
     --error: #3b1f21; --error-text: #ff9592;
+    --p1: #ff6369; --p1-bg: rgba(255, 99, 105, .14); --p2: #7da3ff; --p2-bg: rgba(91, 140, 255, .14);
+    --p3: #f5a623; --p3-bg: rgba(245, 166, 35, .14); --p4: #3cc7b6; --p4-bg: rgba(43, 181, 165, .14);
+    --p5: #c4a1ff; --p5-bg: rgba(181, 140, 255, .14);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -100,6 +113,19 @@
   .settings .seg button:first-child { border-radius: 6px 0 0 6px; }
   .settings .seg button:last-child { border-radius: 0 6px 6px 0; }
   .settings .seg button.on { background: var(--accent); color: #fff; }
+  .settings .prow { display: grid; grid-template-columns: 40px minmax(0, 260px) auto; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .settings .prow label { color: var(--muted); font-weight: 600; }
+  .settings .field {
+    font: inherit; font-size: 13px; color: var(--text); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .settings .banner p { color: inherit; }
+  .settings .found { color: var(--muted); font-size: 12px; }
+  .settings .missing { color: var(--red); font-size: 12px; font-weight: 600; }
+  .settings .option { display: flex; align-items: center; gap: 8px; margin: 14px 0 4px; }
+  .settings .help { color: var(--muted); font-size: 12px; margin: 0 0 0 24px; }
+  .settings .option + .help.flush { margin-left: 0; }
+  .settings input[type=checkbox] { width: 16px; height: 16px; margin: 0; }
   /* Main area */
   main { flex: 1; overflow-y: auto; padding: 36px 48px 80px; }
   .content { max-width: 720px; margin: 0 auto; }
@@ -164,6 +190,13 @@
     border: 1px solid var(--muted); color: var(--muted); border-radius: 10px; padding: 0 7px;
     font-size: 11px; flex-shrink: 0; white-space: nowrap;
   }
+  /* A priority shown on a row (lists that mix priorities): filled and colored, unlike tag pills. */
+  .pill.priority { font-weight: 600; }
+  .pill.priority.P1 { color: var(--p1); border-color: var(--p1); background: var(--p1-bg); }
+  .pill.priority.P2 { color: var(--p2); border-color: var(--p2); background: var(--p2-bg); }
+  .pill.priority.P3 { color: var(--p3); border-color: var(--p3); background: var(--p3-bg); }
+  .pill.priority.P4 { color: var(--p4); border-color: var(--p4); background: var(--p4-bg); }
+  .pill.priority.P5 { color: var(--p5); border-color: var(--p5); background: var(--p5-bg); }
   .deadline { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 12px; white-space: nowrap; }
   .deadline.overdue, .deadline.today { color: var(--red); }
   .deadline svg { width: 12px; height: 12px; }
@@ -304,6 +337,7 @@ const state = {
   edit: null,     // The open inline editor (see startEdit), or null.
   counts: null,   // Sidebar counts from the last list response: {inbox, today: {due, not_due}}.
   priorities: [], // Priority tags, highest first, from the last list response (the editor's choices).
+  priorityNames: {}, // Name of each priority from Settings (priority pills); "" shows the tag.
   hideCompleted: loadSetting("hideCompleted", false), // "Hide Completed" sidebar option.
   hideEmpty: loadSetting("hideEmpty", false), // "Hide Empty" sidebar option (Today's groups).
   theme: loadSetting("theme", "dark"), // Appearance: "dark" (default) or "light".
@@ -368,7 +402,7 @@ function renderSidebar() {
   const nav = document.getElementById("sidebar");
   nav.replaceChildren();
   const title = el("div", "nav-title");
-  title.append(el("div", "name", "Do Things"), el("div", "tagline", "Getting Things Done in Things"));
+  title.append(el("div", "name", "Do Things"), el("div", "tagline", "Turning Plans Into Action"));
   nav.append(title);
   for (const entry of LISTS) {
     if (entry === null) {
@@ -483,6 +517,8 @@ function taskRow(task, priority) {
     line.append(icon);
   }
   for (const tag of task.tags) line.append(el("span", "pill", tag));
+  // Lists that mix priorities show the task's priority, by its name from Settings.
+  if (task.priority) line.append(el("span", `pill priority ${task.priority}`, state.priorityNames[task.priority] || task.priority));
   body.append(line);
   // A task a sequential project started shows its place, e.g. "Seq Project · task 2 of 5".
   const context = [task.context, task.sequence].filter(Boolean).join(" · ");
@@ -624,8 +660,9 @@ function renderList(data) {
  */
 function renderGroup(group) {
   const section = el("section", "group" + (group.tasks.length ? "" : " unfilled"));
-  const title = el("h2", "", group.label);
-  title.append(el("span", "tag", group.priority));
+  // A priority with no name (Settings) shows just its tag.
+  const title = el("h2", "", group.label || group.priority);
+  if (group.label) title.append(el("span", "tag", group.priority));
   const zone = el("div", "drop-zone");
   zone.dataset.priority = group.priority;
   if (!group.tasks.length) zone.append(el("div", "empty", "No tasks"));
@@ -1356,11 +1393,19 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = theme === "light" ? "light" : "dark";
 }
 
-/** Show the Settings page: replace the auth token, choose the appearance. */
-function showSettings() {
+/** Show the Settings page: replace the auth token, choose the appearance, set up the priorities. */
+async function showSettings() {
   state.view = "settings";
   state.edit = null; // Opening Settings closes an open editor without saving.
   renderSidebar();
+  let data = null;
+  let failure = "";
+  try {
+    data = await api("/api/settings");
+  } catch (error) {
+    failure = error.message;
+  }
+  if (state.view !== "settings") return; // Another page was opened meanwhile.
   const content = document.getElementById("content");
   content.replaceChildren();
   const page = el("div", "settings");
@@ -1389,7 +1434,83 @@ function showSettings() {
     seg.append(button);
   }
   page.append(seg);
+
+  page.append(el("h2", "", "Priorities"));
+  if (data) page.append(prioritySettings(data));
+  else page.append(el("div", "banner", failure));
   content.append(page);
+}
+
+// Steps shown in Settings for priority tags missing in Things.
+const MISSING_TAG_STEPS = [
+  "In Things, choose Window › Tags.",
+  "Click + and add each missing tag, spelled exactly as shown.",
+  "Come back here: Settings checks again each time it opens.",
+];
+
+/**
+ * Build the Priorities settings from GET /api/settings: a name for each
+ * priority with whether its tag exists in Things, "Auto assign due and
+ * overdue tasks P1" and the priority for new Today tasks. Each change is
+ * saved at once (the server validates it); a refused change is reported
+ * below the section.
+ */
+function prioritySettings(data) {
+  const section = el("div");
+  let current = data.settings;
+  const message = el("div", "error");
+  const save = async (changes) => {
+    try {
+      current = (await api("/api/settings", { settings: { ...current, ...changes } })).settings;
+      message.textContent = "";
+    } catch (error) {
+      message.textContent = error.message;
+    }
+  };
+
+  section.append(el("p", "", "Names are shown on Today's group headers and on priority pills. The P1–P5 tags in Things don't change."));
+  const missing = data.missing_tags;
+  if (missing.length) {
+    const [kind, exists] = missing.length === 1 ? ["a tag", "it exists"] : ["tags", "they exist"];
+    section.append(stepsBanner(
+      `Do Things needs ${kind} named ${joinNames(missing)} in Things. Until ${exists}, no rules run and nothing is changed in Things.`,
+      MISSING_TAG_STEPS));
+  }
+  for (const p of data.priorities) {
+    const row = el("div", "prow");
+    const label = el("label", "", p);
+    label.htmlFor = `name-${p}`;
+    const input = el("input", "field");
+    input.id = label.htmlFor;
+    input.value = current.names[p];
+    input.placeholder = "No name";
+    input.maxLength = 40;
+    input.onchange = () => save({ names: { ...current.names, [p]: input.value } });
+    const found = !missing.includes(p);
+    row.append(label, input, el("span", found ? "found" : "missing", found ? "✓ In Things" : "Not found in Things"));
+    section.append(row);
+  }
+
+  const auto = el("label", "option");
+  const box = el("input");
+  box.type = "checkbox";
+  box.checked = current.auto_p1;
+  box.onchange = () => save({ auto_p1: box.checked });
+  auto.append(box, el("span", "", "Auto assign due and overdue tasks P1"));
+  section.append(auto, el("p", "help",
+    "When off, due tasks keep their priority, and moving a task into or out of P1 leaves its deadline alone."));
+
+  const option = el("div", "option");
+  const pick = selectOf(data.priorities.map((p) => [p, p]), current.default_priority);
+  pick.className = "field";
+  pick.id = "default-priority";
+  pick.onchange = () => save({ default_priority: pick.value });
+  const pickLabel = el("label", "", "Assign priority");
+  pickLabel.htmlFor = pick.id;
+  option.append(pickLabel, pick, el("span", "", "to new Today tasks"));
+  section.append(option, el("p", "help flush", "Tasks of Next Up projects get P4 instead."));
+  section.append(message);
+  return section;
 }
 
 // --- Setup (auth token) --------------------------------------------------------
@@ -1461,6 +1582,7 @@ async function load() {
     if (!data.token_set) { showSetup(true); return; }
     state.counts = data.counts;
     state.priorities = data.priorities;
+    state.priorityNames = data.priority_names;
     renderSidebar(); // Again, now with the fresh counts.
     renderList(data);
   } catch (error) {

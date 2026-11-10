@@ -5,11 +5,14 @@ See [CHANGELOG.md](CHANGELOG.md) for what's new in each version.
 ## Why this exists
 Things 3 is good at capturing and organizing everything you might do. Do Things is for the other half of the job: doing it.
 
-It is a companion view for your Things Today list. It sorts today's tasks into four priorities:
+It is a companion view for your Things Today list. It sorts today's tasks into five priorities:
 - **P1 Due Today:** must be done today.
 - **P2 To Do:** today's planned work.
 - **P3 Follow Up:** waiting on someone, or to check on.
 - **P4 Next Up:** the next step of a lower-priority project you want to be reminded of.
+- **P5:** a fifth, lowest priority, with no name until you give it one.
+
+The names are yours to change in Settings; the tags stay `P1` to `P5`.
 
 You work from the top down. Reprioritizing is a drag. The housekeeping that usually eats into the day is done for you: tagging, deadlines, and starting the next step of a project.
 
@@ -20,23 +23,24 @@ Everything stays in Things. Do Things holds no tasks of its own. It reads your T
 
 *Today in Do Things, with sample data. "Reserve hotel" is the next step of the sequential **Vacation** project (task 2 of 5; "Book flights" is done). Below Follow Up, the Next Up group holds one reminder from each Next Up project: the next book in **Books to read** (task 1 of 4) and the next chore in **Chores** (task 2 of 3). "Water the plants" was checked off today.*
 
-- **Today in four priorities.** Today's tasks are grouped by their `P1`, `P2`, `P3` and `P4` tags. Within each group you set the order by dragging. Tasks you haven't ordered follow Things' Today order, and tasks from the same project keep their order from that project.
+- **Today in five priorities.** Today's tasks are grouped by their `P1` to `P5` tags, under the names set in Settings (a priority with no name shows just its tag). Within each group you set the order by dragging. Tasks you haven't ordered follow Things' Today order, and tasks from the same project keep their order from that project.
 - **Priority rules kept for you.** On every refresh (page load, returning to the window, and every 60 seconds):
-  1. A task due today or overdue is tagged P1.
+  1. A task due today or overdue is tagged P1 (unless **Auto assign due and overdue tasks P1** is off in Settings).
   2. A task with more than one P tag keeps only the highest.
-  3. A Today task with no P tag is tagged P2, or P4 if it belongs to a Next Up project.
+  3. A Today task with no P tag gets the priority chosen in Settings (P2 to start), or P4 if it belongs to a Next Up project.
   4. A task with no start date that is due today or overdue gets a start date of today, so it is in Things' Today too.
 - **Move tasks between priorities.** Dragging a task to another group replaces its P tag.
   - **Moving into P1** gives it a deadline of today if it has none.
   - **Moving out of P1** removes a deadline of today or earlier. If the task was in Today only because of that deadline, it gets a start date of today so it stays in Today.
   - **A deadline after today** is always kept.
+  - With **Auto assign due and overdue tasks P1** off, moves never change the deadline.
 - **Sequential projects.** Tag a Things project `Sequential` and Do Things brings its tasks into Today one at a time, in project order. When you check one off, the next one starts. Each such task shows its place, for example "Seq Project · task 2 of 5". If you uncheck a task, the task it started goes back.
 - **Next Up projects.** Next Up is for lower-priority projects that don't need immediate action but that you want to be reminded of, such as books to read, shows to watch or chores to do. Tag a Things project `Next Up` and it works like a Sequential project, one task at a time in project order. Each task it starts goes into a fourth Today group, **Next Up (P4)**, below Follow Up. So does any other task of a Next Up project that is in Today without a P tag, such as one you dated yourself. If a project is tagged both `Sequential` and `Next Up`, Sequential wins and Do Things removes the `Next Up` tag from the project.
-- **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
+- **Searches.** P1, P2, P3, P4 and Overdue in the sidebar. The P searches show today's tasks with that tag; Overdue shows every open task past its deadline, each with its priority as a colored pill. **Hide Completed** hides tasks checked off today, in every view. **Hide Empty** hides Today's priority groups that show no tasks (they reappear while you drag a task, so you can drop it into any priority).
 - **Reset a Sequential or Next Up project.** If more than one task of such a project ends up in Today, open the one you want to keep and click **Reset other tasks**. Do Things first shows which tasks will go back to Anytime, and does nothing until you click **Reset**. Every other task of that project in Today goes back to Anytime, except tasks with a deadline, which follow their own dates. The kept task becomes the one in progress. The returned tasks keep their place in the project, and when the kept task is done the next one started is the first undated task in project order, so check the project's order in Things afterwards.
 - **Complete and edit in place.** Check a task off from Do Things. Click a task to edit its title, notes, tags, When, deadline, project or area, heading and priority. **Move to Trash** in the same card moves an open task to Things' Trash after you confirm it (put it back from the Trash in Things if needed). **Open in Things** handles everything else.
 - **Help one click away.** The version at the bottom of the sidebar opens this guide on GitHub.
-- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
+- **Looks like Things.** Rows show tags, deadline flags ("2 days left", or red "1 day ago"), start-date badges, and icons for notes, checklists and repeating tasks. Where a list mixes priorities (Overdue), each task's priority shows as a colored pill with its name, set apart from the gray tags. A task with a reminder shows its time in small gray text after the title (for example "2:30 PM"), and the editor shows it on the When line; reminders are set in Things. Dark and Light appearance.
 - **Things' other lists one click away.** Inbox, Upcoming, Anytime, Someday and Logbook (marked ↗) open in Things. The sidebar shows the Inbox count and Today's due and open counts, as in Things.
 
 ## Advantages over Things
@@ -69,11 +73,11 @@ The commands in this guide assume that location. If you put it elsewhere, change
 **Updating to a new version:**
 1. Stop Do Things (see section 7).
 2. Download and unzip the new release.
-3. Copy these files from your old `DoThings` folder into the new one: `auth_token.txt`, `task_order.json` and `sequence_pulls.json`. These are your token, your saved order and your sequential-project progress.
+3. Copy these files from your old `DoThings` folder into the new one: `auth_token.txt`, `task_order.json`, `sequence_pulls.json` and `settings.json`. These are your token, your saved order, your sequential-project progress and your settings.
 4. Replace the old folder with the new one.
 
 ## 3. Prepare Things and your Mac
-1. **Create the priority tags.** In Things, open **Window › Tags** and create four tags named exactly `P1`, `P2`, `P3` and `P4`. Things ignores tags that don't exist, so Do Things can't assign priorities until these do. Do Things shows how to create them if any are missing.
+1. **Create the priority tags.** In Things, open **Window › Tags** and create five tags named exactly `P1`, `P2`, `P3`, `P4` and `P5`. Things ignores tags that don't exist, so Do Things can't assign priorities until these do. Do Things shows how to create them if any are missing.
 2. **Optional: create the `Sequential` and `Next Up` tags** the same way. Add `Sequential` to any project you want worked in order, and `Next Up` to lower-priority projects you want to be reminded of one item at a time (`Next Up` is spelled with a space and a capital U).
 3. **Allow Terminal to read Things' data.** Things keeps its data in a protected folder.
    - The first time you run Do Things (or `debug_things.py`) from Terminal, macOS asks whether Terminal may access data from other apps. Click **Allow**.
@@ -100,7 +104,12 @@ The commands in this guide assume that location. If you put it elsewhere, change
    - It is never committed to git or written to a log.
 4. To stop Do Things, press Ctrl-C in Terminal.
 
-**Settings** at the bottom of the sidebar lets you replace the token and switch between **Dark** (the default) and **Light** appearance.
+**Settings** at the bottom of the sidebar lets you replace the token, switch between **Dark** (the default) and **Light** appearance, and set up the priorities:
+- **A name for each priority,** shown on Today's group headers and on priority pills. Leave it empty to show just the tag (P5 starts that way). Next to each name, Settings shows whether its tag exists in Things.
+- **Auto assign due and overdue tasks P1.** On by default. When off, a due task keeps its priority, and moving a task into or out of P1 leaves its deadline alone.
+- **Assign priority … to new Today tasks.** The priority a Today task without a P tag gets (P2 to start). Tasks of Next Up projects still get P4.
+
+Settings are saved as you change them, in `settings.json` in the Do Things folder.
 
 If Things doesn't apply an automatic update, Do Things pauses automatic updates and shows a red bar. The bar lists what to check, and has a **Retry** button and a button to re-enter the token.
 
@@ -190,6 +199,7 @@ Running the shortcut while Do Things is already running just opens the page agai
 | `errors.log`, `run.log` | Runtime logs (untracked). `errors.log` is capped at 1 MB, with the previous one kept as `errors.log.1` |
 | `task_order.json` | Saved order within each priority; tasks that leave Today are dropped from it (untracked) |
 | `sequence_pulls.json` | The task Do Things started in each Sequential or Next Up project, so it can be undone (untracked) |
+| `settings.json` | Your settings: priority names, Auto assign P1 and the priority for new Today tasks (untracked) |
 | `auth_token.txt` | Things auth token, owner-only permissions (untracked) |
 
 ## Safety notes

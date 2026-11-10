@@ -16,3 +16,6 @@ __pycache__/
 
 # Tasks Do Things started in sequential projects
 sequence_pulls.json
+
+# The user's settings (priority names and options)
+settings.json

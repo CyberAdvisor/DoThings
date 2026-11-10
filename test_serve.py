@@ -3,9 +3,12 @@
 Uses a mock Things database (schema from test_common.py). Things itself and
 the auth token are replaced with mocks, so nothing is sent to Things.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): Tests for /api/settings, names on Today's groups,
+  the default priority, auto-assign P1 off, priority pills and P5; settings
+  kept in the temporary folder.
 - v1.5.0 (2026-11-08): Tests for moving a task to the Trash (/api/trash).
 - v1.4.0 (2026-11-08): Tests for reminder times in rows, the editor and the edit preview.
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
@@ -39,8 +42,10 @@ from common import (
     STATUS_OPEN,
     THINGS_LISTS,
     load_pulls,
+    load_settings,
     pack_things_date,
     save_pulls,
+    save_settings,
     start_of_day,
 )
 from test_common import SCHEMA, TODAY, write_db
@@ -53,6 +58,7 @@ class MockThingsTestCase(unittest.TestCase):
         self.folder = tempfile.TemporaryDirectory()
         self.db_path = os.path.join(self.folder.name, "main.sqlite")
         self.pulls_path = os.path.join(self.folder.name, "sequence_pulls.json")
+        self.settings_path = os.path.join(self.folder.name, "settings.json")
         conn = sqlite3.connect(self.db_path)
         conn.executescript(SCHEMA)
         conn.execute("INSERT INTO TMTag VALUES ('t1', 'P1')")
@@ -74,6 +80,9 @@ class MockThingsTestCase(unittest.TestCase):
             # Keep the sequence record in the temporary folder, never the project's.
             mock.patch.object(serve, "load_pulls", lambda: load_pulls(self.pulls_path)),
             mock.patch.object(serve, "save_pulls", lambda pulls: save_pulls(pulls, self.pulls_path)),
+            # Settings too: the defaults unless a test saves others.
+            mock.patch.object(serve, "load_settings", lambda: load_settings(self.settings_path)),
+            mock.patch.object(serve, "save_settings", lambda settings: save_settings(settings, self.settings_path)),
         ]
         for patch in patches:
             patch.start()
@@ -96,12 +105,12 @@ class MissingTagTests(MockThingsTestCase):
 
     def test_refresh_skipped_while_tags_missing(self) -> None:
         response = serve.list_response("today")
-        self.assertEqual(response["missing_tags"], ["P2", "P3", "P4"])
+        self.assertEqual(response["missing_tags"], ["P2", "P3", "P4", "P5"])
         self.assertFalse(response["refresh_paused"])
         self.apply_change.assert_not_called()
 
     def test_refresh_runs_once_tags_exist(self) -> None:
-        self.add_tags("P2", "P3", "P4")
+        self.add_tags("P2", "P3", "P4", "P5")
         response = serve.list_response("today")
         self.assertEqual(response["missing_tags"], [])
         self.apply_change.assert_called_once()
@@ -124,7 +133,7 @@ class RefreshPauseTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "P4")
+        self.add_tags("P2", "P3", "P4", "P5")
         self.apply_change.return_value = False
 
     def test_failure_pauses_and_retry_resumes(self) -> None:
@@ -155,7 +164,7 @@ class OrderPruneTests(MockThingsTestCase):
     def test_gone_ids_dropped(self) -> None:
         with mock.patch.object(serve, "load_order", return_value={"P2": ["gone", "task1"]}):
             serve.list_response("p1")
-        serve.save_order.assert_called_once_with({"P1": [], "P2": ["task1"], "P3": [], "P4": []})
+        serve.save_order.assert_called_once_with({"P1": [], "P2": ["task1"], "P3": [], "P4": [], "P5": []})
 
     def test_nothing_saved_when_all_present(self) -> None:
         with mock.patch.object(serve, "load_order", return_value={"P2": ["task1"]}):
@@ -167,7 +176,7 @@ class StartDateRefreshTests(MockThingsTestCase):
     """A refresh gives tasks with no start date that are due today a start date of today."""
 
     def test_inbox_anytime_and_someday_tasks_due_today(self) -> None:
-        self.add_tags("P2", "P3", "P4")
+        self.add_tags("P2", "P3", "P4", "P5")
         due = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.executemany(
@@ -205,7 +214,7 @@ class ProjectTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "P4", "Sequential")
+        self.add_tags("P2", "P3", "P4", "P5", "Sequential")
         started = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
@@ -352,7 +361,7 @@ class NextUpTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "P4", "Sequential", "Next Up")
+        self.add_tags("P2", "P3", "P4", "P5", "Sequential", "Next Up")
         with write_db(self.db_path) as conn:
             conn.execute("DELETE FROM TMTask WHERE uuid = 'task1'")
             conn.executemany(
@@ -388,8 +397,8 @@ class NextUpTests(MockThingsTestCase):
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMTaskTag VALUES ('b1', 'P4')")
         response = serve.list_response("today")
-        self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4"])
-        last = response["groups"][-1]
+        self.assertEqual(response["priorities"], ["P1", "P2", "P3", "P4", "P5"])
+        last = response["groups"][-2]
         self.assertEqual((last["priority"], last["label"]), ("P4", "Next Up"))
         self.assertEqual([(t["id"], t["sequence"], t["tags"]) for t in last["tasks"]], [("b1", "task 1 of 2", [])])
         self.assertEqual([t["id"] for t in serve.list_response("p4")["tasks"]], ["b1"])
@@ -426,7 +435,7 @@ class SequenceResetTests(MockThingsTestCase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "P4", "Next Up", "Home")
+        self.add_tags("P2", "P3", "P4", "P5", "Next Up", "Home")
         today = pack_things_date(TODAY)
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMTask (uuid, title, type, status, trashed, \"index\") "
@@ -540,15 +549,18 @@ class CompletionTests(MockThingsTestCase):
                 self.assertEqual(ids(hidden), ["task1"])
                 self.assertEqual(hidden["counts"], shown["counts"])
 
-    def test_p_tags_shown_only_in_overdue(self) -> None:
+    def test_priority_pill_only_in_overdue(self) -> None:
         self.add_tags("Home")
         with write_db(self.db_path) as conn:
             conn.executemany("INSERT INTO TMTaskTag VALUES ('task1', ?)", [("t1",), ("Home",)])
             conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'",
                          (pack_things_date(TODAY - timedelta(days=1)),))
-        self.assertEqual(serve.list_response("today")["groups"][0]["tasks"][0]["tags"], ["Home"])
-        self.assertEqual(serve.list_response("p1")["tasks"][0]["tags"], ["Home"])
-        self.assertEqual(sorted(serve.list_response("overdue")["tasks"][0]["tags"]), ["Home", "P1"])
+        pill = lambda row: (row["tags"], row["priority"])
+        self.assertEqual(pill(serve.list_response("today")["groups"][0]["tasks"][0]), (["Home"], None))
+        self.assertEqual(pill(serve.list_response("p1")["tasks"][0]), (["Home"], None))
+        overdue = serve.list_response("overdue")
+        self.assertEqual(pill(overdue["tasks"][0]), (["Home"], "P1"))
+        self.assertEqual(overdue["priority_names"]["P1"], "Due Today")  # The page names the pill.
 
     def test_completed_task_cannot_be_moved(self) -> None:
         self.add_completed_task("done1")
@@ -599,12 +611,58 @@ class TrashTests(MockThingsTestCase):
         self.assertIs(serve.POST_ROUTES["/api/trash"], serve.trash_task)
 
 
+class SettingsApiTests(MockThingsTestCase):
+    """GET and POST /api/settings, and the rules and labels following the saved settings."""
+
+    def save(self, **changes: object) -> dict:
+        """Save the default settings with `changes` applied, as the Settings page sends them."""
+        settings = dict(serve.settings_response()["settings"], **changes)
+        return serve.update_settings({"settings": settings})
+
+    def test_defaults_and_missing_tags(self) -> None:
+        response = serve.settings_response()
+        self.assertEqual(response["settings"]["names"]["P2"], "To Do")
+        self.assertEqual((response["settings"]["auto_p1"], response["settings"]["default_priority"]), (True, "P2"))
+        self.assertEqual(response["missing_tags"], ["P2", "P3", "P4", "P5"])
+
+    def test_saved_names_label_today(self) -> None:
+        names = dict(serve.settings_response()["settings"]["names"], P2="Doing", P5="Later")
+        self.assertEqual(self.save(names=names)["settings"]["names"]["P2"], "Doing")
+        groups = serve.list_response("today")["groups"]
+        self.assertEqual([g["label"] for g in groups], ["Due Today", "Doing", "Follow Up", "Next Up", "Later"])
+
+    def test_invalid_settings_refused_and_not_saved(self) -> None:
+        with self.assertRaises(serve.ApiError) as raised:
+            self.save(default_priority="P9")
+        self.assertEqual(raised.exception.status, 400)
+        self.assertFalse(os.path.exists(self.settings_path))
+
+    def test_default_priority_for_new_today_tasks(self) -> None:
+        self.add_tags("P2", "P3", "P4", "P5")
+        self.save(default_priority="P3")
+        serve.list_response("today")
+        self.assertEqual(self.apply_change.call_args[0][0].tags, ["P3"])  # Untagged task1 gets P3.
+
+    def test_auto_p1_off(self) -> None:
+        self.add_tags("P2", "P3", "P4", "P5")
+        self.save(auto_p1=False)
+        with write_db(self.db_path) as conn:
+            conn.execute("INSERT INTO TMTaskTag VALUES ('task1', 'P3')")
+            conn.execute("UPDATE TMTask SET deadline = ? WHERE uuid = 'task1'", (pack_things_date(TODAY),))
+        response = serve.list_response("today")
+        self.apply_change.assert_not_called()  # Due today, but it keeps P3.
+        self.assertEqual([t["id"] for t in response["groups"][2]["tasks"]], ["task1"])
+        serve.move_task({"id": "task1", "priority": "P1", "order": ["task1"]})
+        sent = self.apply_change.call_args[0][0]
+        self.assertEqual((sent.tags, sent.set_deadline, sent.clear_deadline), (["P1"], None, False))
+
+
 class EditTests(MockThingsTestCase):
     """Loading a task for the inline editor and saving edits."""
 
     def setUp(self) -> None:
         super().setUp()
-        self.add_tags("P2", "P3", "P4", "Home")
+        self.add_tags("P2", "P3", "P4", "P5", "Home")
         with write_db(self.db_path) as conn:
             conn.execute("INSERT INTO TMArea VALUES ('area1', 'Work')")
             conn.executemany(
@@ -627,7 +685,7 @@ class EditTests(MockThingsTestCase):
         detail = serve.task_detail("task1")
         task = detail["task"]
         self.assertEqual((task["priority"], task["when"]), ("P2", {"kind": "today", "date": TODAY.isoformat(), "reminder": None}))
-        self.assertEqual((task["tags"], task["other_tags"]), (["P2"], []))
+        self.assertEqual((task["tags"], task["other_tags"]), ([], []))
         self.assertEqual(detail["today"], TODAY.isoformat())
         self.assertEqual(detail["options"]["tags"], ["Home"])
         self.assertEqual([p["id"] for p in detail["options"]["projects"]], ["proj1"])
@@ -662,11 +720,11 @@ class EditTests(MockThingsTestCase):
         with mock.patch.object(serve, "load_order", return_value={"P1": ["x"], "P2": ["task1"]}):
             self.edit(priority="P1")
         self.assertEqual(self.sent().set_deadline, TODAY)
-        self.save_order.assert_called_once_with({"P1": ["x", "task1"], "P2": [], "P3": [], "P4": []})
+        self.save_order.assert_called_once_with({"P1": ["x", "task1"], "P2": [], "P3": [], "P4": [], "P5": []})
 
     def test_invalid_changes_rejected(self) -> None:
         for changes in ({"title": ""}, {"title": "two\nlines"}, {"when": "evening"}, {"deadline": "soon"},
-                        {"priority": "P5"}, {"tags": ["Nope"]}, {"list_id": "nosuch"},
+                        {"priority": "P6"}, {"tags": ["Nope"]}, {"list_id": "nosuch"},
                         {"heading_id": "head1"},  # task1 isn't in proj1
                         {"color": "red"}):
             with self.subTest(changes=changes), self.assertRaises(serve.ApiError):
@@ -774,7 +832,8 @@ class RowDisplayTests(unittest.TestCase):
     def test_row_fields(self) -> None:
         task = Task(uuid="A1", title="T", tags=["Home", "P1"], notes="  ", repeating=True, has_checklist=True)
         row = serve.task_to_json(task, TODAY)
-        self.assertEqual(row["tags"], ["Home", "P1"])
+        self.assertEqual((row["tags"], row["priority"]), (["Home"], None))  # P tags are never among the tags.
+        self.assertEqual(serve.task_to_json(task, TODAY, priority_pill=True)["priority"], "P1")
         self.assertFalse(row["has_notes"])  # Only whitespace.
         self.assertTrue(row["has_checklist"] and row["repeating"])
         self.assertTrue(serve.task_to_json(Task(uuid="A2", title="T", notes="x"), TODAY)["has_notes"])

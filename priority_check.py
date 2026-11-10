@@ -1,15 +1,20 @@
 """Priority rules for Do Things.
 
 Pure logic with no I/O, so every rule can be unit-tested without Things.
-It decides which priority tag (P1-P4) a task should carry, what changes a
+It decides which priority tag (P1-P5) a task should carry, what changes a
 manual move implies, what completing or reopening a task implies, what an
 edit from the edit view implies, and how tasks are grouped and ordered for
 display. It also decides what kind of sequence a project tagged Sequential or
-Next Up is, and which task such a project starts next.
+Next Up is, and which task such a project starts next, and validates the
+user's settings (priority names and options).
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): P5 priority; Settings (priority names, auto-assign P1,
+  default priority for new Today tasks) with parse_settings; the rules take the
+  settings: with auto-assign off a due task keeps its priority and moves leave
+  deadlines alone, and untagged Today tasks get the default priority.
 - v1.5.0 (2026-11-08): Synchronized module version metadata.
 - v1.4.0 (2026-11-08): Task carries its reminder time (display only).
 - v1.3.1 (2026-11-08): Synchronized module version metadata.
@@ -33,10 +38,12 @@ from datetime import time as dt_time
 from typing import Dict, Iterable, List, Optional, Tuple
 
 # Priority tags, highest first. Their order defines "highest priority wins".
-PRIORITIES = ("P1", "P2", "P3", "P4")
+PRIORITIES = ("P1", "P2", "P3", "P4", "P5")
 
-# Display name of each priority group in the Today view.
-PRIORITY_LABELS = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up"}
+# Default display name of each priority (Today's group headers and priority
+# pills). The user can rename them in Settings; an empty name shows the tag.
+DEFAULT_PRIORITY_NAMES = {"P1": "Due Today", "P2": "To Do", "P3": "Follow Up", "P4": "Next Up", "P5": ""}
+MAX_PRIORITY_NAME_CHARS = 40
 
 # Project tags in Things that make a project release its tasks one at a time.
 # An untagged Today task of a Next Up project becomes P4 (refresh rule 3);
@@ -141,6 +148,55 @@ class ProjectChange:
         return set(project_tags) == set(self.tags)
 
 
+@dataclass(frozen=True)
+class Settings:
+    """The user's settings that the rules and display use.
+
+    `names`: display name per priority ("" shows the bare tag). `auto_p1`:
+    refresh rule 1 (due today or overdue -> P1) is on; when off, a due task
+    keeps its priority and moves into or out of P1 leave the deadline alone.
+    `default_priority`: what an untagged Today task gets (refresh rule 3),
+    except a task of a Next Up project, which gets P4.
+    """
+
+    names: Dict[str, str] = field(default_factory=lambda: dict(DEFAULT_PRIORITY_NAMES))
+    auto_p1: bool = True
+    default_priority: str = "P2"
+
+    def to_json(self) -> Dict[str, object]:
+        """Return the settings as stored in settings.json and sent to the page."""
+        return {"names": dict(self.names), "auto_p1": self.auto_p1, "default_priority": self.default_priority}
+
+
+# Settings until the user changes them (also what the rules use when given none).
+DEFAULT_SETTINGS = Settings()
+
+
+def parse_settings(raw: object) -> Settings:
+    """Return validated Settings from a JSON object; raise ValueError naming the first problem.
+
+    Missing keys keep their default, so a settings file from an older version
+    still loads. Names are trimmed.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError("Settings must be a JSON object.")
+    names = dict(DEFAULT_SETTINGS.names)
+    given = raw.get("names", {})
+    if not isinstance(given, dict) or not set(given) <= set(PRIORITIES):
+        raise ValueError("Priority names must be given per priority, P1 to P5.")
+    for priority, name in given.items():
+        if not isinstance(name, str) or "\n" in name or len(name.strip()) > MAX_PRIORITY_NAME_CHARS:
+            raise ValueError(f"The name for {priority} must be one line of up to {MAX_PRIORITY_NAME_CHARS} characters.")
+        names[priority] = name.strip()
+    auto_p1 = raw.get("auto_p1", DEFAULT_SETTINGS.auto_p1)
+    if not isinstance(auto_p1, bool):
+        raise ValueError("auto_p1 must be true or false.")
+    default_priority = raw.get("default_priority", DEFAULT_SETTINGS.default_priority)
+    if default_priority not in PRIORITIES:
+        raise ValueError("The priority for new Today tasks must be one of P1 to P5.")
+    return Settings(names=names, auto_p1=auto_p1, default_priority=default_priority)
+
+
 def priority_tags(tags: Iterable[str]) -> List[str]:
     """Return the priority tags in `tags`, highest priority first."""
     present = set(tags)
@@ -153,15 +209,21 @@ def current_priority(tags: Iterable[str]) -> Optional[str]:
     return found[0] if found else None
 
 
-def required_priority(task: Task, today: date) -> str:
+def is_due(task: Task, today: date) -> bool:
+    """Return True if `task` has a deadline of today or earlier."""
+    return task.deadline is not None and task.deadline <= today
+
+
+def required_priority(task: Task, today: date, settings: Settings = DEFAULT_SETTINGS) -> str:
     """Return the priority a Today task must carry under the refresh rules.
 
-    Rules, in order: overdue or due today -> P1; otherwise the highest P tag
-    it already has; otherwise P4 for a task of a Next Up project, else P2.
+    Rules, in order: overdue or due today -> P1 (only while settings.auto_p1
+    is on); otherwise the highest P tag it already has; otherwise P4 for a
+    task of a Next Up project, else settings.default_priority.
     """
-    if task.deadline is not None and task.deadline <= today:
+    if settings.auto_p1 and is_due(task, today):
         return "P1"
-    return current_priority(task.tags) or ("P4" if task.next_up else "P2")
+    return current_priority(task.tags) or ("P4" if task.next_up else settings.default_priority)
 
 
 def _with_priority(tags: List[str], priority: str) -> List[str]:
@@ -169,7 +231,7 @@ def _with_priority(tags: List[str], priority: str) -> List[str]:
     return [t for t in tags if t not in PRIORITIES] + [priority]
 
 
-def plan_refresh(task: Task, today: date) -> Optional[Change]:
+def plan_refresh(task: Task, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[Change]:
     """Return the change the refresh rules require, or None if compliant.
 
     Fixes the priority tags, and gives a task with no start date (Inbox,
@@ -179,9 +241,9 @@ def plan_refresh(task: Task, today: date) -> Optional[Change]:
     """
     if task.completed:
         return None
-    desired = _with_priority(task.tags, required_priority(task, today))
+    desired = _with_priority(task.tags, required_priority(task, today, settings))
     tags_wrong = set(desired) != set(task.tags)
-    needs_start = task.start_date is None and task.deadline is not None and task.deadline <= today
+    needs_start = task.start_date is None and is_due(task, today)
     if not tags_wrong and not needs_start:
         return None
     return Change(
@@ -191,7 +253,7 @@ def plan_refresh(task: Task, today: date) -> Optional[Change]:
     )
 
 
-def plan_move(task: Task, destination: str, today: date) -> Change:
+def plan_move(task: Task, destination: str, today: date, settings: Settings = DEFAULT_SETTINGS) -> Change:
     """Return the change for manually moving `task` to `destination`.
 
     All P tags are replaced by the destination tag; a deadline after today is
@@ -199,14 +261,16 @@ def plan_move(task: Task, destination: str, today: date) -> Change:
     P1 clears a deadline of today or earlier (an overdue one would put the task
     straight back in P1), and if the task is in Today only because of that
     deadline (no start date, or one after today) also sets its start date to
-    today, so it stays in Today. Moves among P2, P3 and P4 leave the deadline alone.
+    today, so it stays in Today. Moves among P2 to P5 leave the deadline alone.
+    With settings.auto_p1 off no rule ties P1 to the deadline, so no move
+    changes it.
     """
     if destination not in PRIORITIES:
         raise ValueError(f"Unknown priority: {destination!r}")
-    source = required_priority(task, today)
+    source = required_priority(task, today, settings)
     change = Change(task_id=task.uuid, tags=_with_priority(task.tags, destination))
     later_deadline = task.deadline is not None and task.deadline > today
-    if later_deadline:
+    if later_deadline or not settings.auto_p1:
         return change
     if destination == "P1" and source != "P1":
         change.set_deadline = today
@@ -250,7 +314,7 @@ class TaskEdit:
     heading_id: Optional[str] = None
 
 
-def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
+def plan_edit(task: Task, edit: TaskEdit, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[Change]:
     """Return the single Change for an edit-view save, or None if nothing changed.
 
     A priority change applies the move rules (plan_move), then the explicit
@@ -261,8 +325,8 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
     """
     if edit.when_keyword is not None and edit.when_keyword not in WHEN_KEYWORDS:
         raise ValueError(f"Unknown When value: {edit.when_keyword!r}")
-    if edit.priority is not None and edit.priority != required_priority(task, today):
-        change = plan_move(task, edit.priority, today)
+    if edit.priority is not None and edit.priority != required_priority(task, today, settings):
+        change = plan_move(task, edit.priority, today, settings)
     else:
         change = Change(task_id=task.uuid, tags=None)
     if edit.other_tags is not None:
@@ -295,8 +359,7 @@ def plan_edit(task: Task, edit: TaskEdit, today: date) -> Optional[Change]:
 def in_today(task: Task, today: date) -> bool:
     """Return True if Things lists `task` in Today: started, or due today or overdue."""
     started = task.start_date is not None and task.start_date <= today
-    due = task.deadline is not None and task.deadline <= today
-    return started or due
+    return started or is_due(task, today)
 
 
 def _applied(task: Task, change: Change) -> Task:
@@ -317,7 +380,7 @@ def _applied(task: Task, change: Change) -> Task:
     return after
 
 
-def predict(task: Task, change: Change, today: date) -> Task:
+def predict(task: Task, change: Change, today: date, settings: Settings = DEFAULT_SETTINGS) -> Task:
     """Return `task` as it will be once `change` is applied and the next refresh has run.
 
     Used to show an edit's result before Things confirms it, so the page never
@@ -325,20 +388,20 @@ def predict(task: Task, change: Change, today: date) -> Task:
     """
     after = _applied(task, change)
     if in_today(after, today):
-        refresh = plan_refresh(after, today)  # Only Today tasks get the refresh rules.
+        refresh = plan_refresh(after, today, settings)  # Only Today tasks get the refresh rules.
         if refresh is not None:
             after = _applied(after, refresh)
     return after
 
 
-def place_in_list(task: Task, name: str, today: date) -> Optional[str]:
+def place_in_list(task: Task, name: str, today: date, settings: Settings = DEFAULT_SETTINGS) -> Optional[str]:
     """Return where `task` appears in the app list `name`, or None if it isn't listed.
 
-    For "today" this is its priority group (P1-P4); for a search, "list".
+    For "today" this is its priority group (P1-P5); for a search, "list".
     Mirrors the list queries in common.py for a task already refreshed.
     """
     if name == "today":
-        return required_priority(task, today) if in_today(task, today) else None
+        return required_priority(task, today, settings) if in_today(task, today) else None
     if name.upper() in PRIORITIES:
         listed = in_today(task, today) and current_priority(task.tags) == name.upper()
     elif name == "overdue":
@@ -371,7 +434,7 @@ def today_counts(tasks: Iterable[Task], today: date) -> Dict[str, int]:
     other open tasks (the gray number). Together they are all open tasks.
     """
     open_tasks = [t for t in tasks if not t.completed]
-    due = sum(1 for t in open_tasks if t.deadline is not None and t.deadline <= today)
+    due = sum(1 for t in open_tasks if is_due(t, today))
     return {"due": due, "not_due": len(open_tasks) - due}
 
 
@@ -447,7 +510,7 @@ def plan_sequence(project_tasks: Iterable[Task], today: date) -> Optional[Change
     The task in progress (sequence_next) gets a start date of today when it
     has none. While it is open nothing else is pulled in; once it is done the
     next undated task is. Its P tag comes from refresh rule 3 in the same
-    refresh: P4 in a Next Up project, P2 in a Sequential one.
+    refresh: P4 in a Next Up project, the default priority in a Sequential one.
     """
     task = sequence_next(project_tasks, today)
     if task is None or task.start_date is not None:
@@ -514,12 +577,12 @@ def completed_last(tasks: List[Task]) -> List[Task]:
 
 
 def group_today(
-    tasks: List[Task], order: Dict[str, List[str]], today: date
+    tasks: List[Task], order: Dict[str, List[str]], today: date, settings: Settings = DEFAULT_SETTINGS
 ) -> Dict[str, List[Task]]:
     """Group Today tasks by priority: open tasks in the saved order, then completed ones."""
     groups: Dict[str, List[Task]] = {p: [] for p in PRIORITIES}
     for task in tasks:
-        groups[required_priority(task, today)].append(task)
+        groups[required_priority(task, today, settings)].append(task)
     return {p: completed_last(apply_order(groups[p], order.get(p, []))) for p in PRIORITIES}
 
 

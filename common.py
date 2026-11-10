@@ -1,11 +1,14 @@
 """Shared logic for Do Things.
 
 Holds file paths, version loading, logging, read-only access to the Things
-database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file and the auth token.
+database, Things URL commands, the AppleScript that moves a to-do to the Trash, the local task-order file,
+the user's settings file and the auth token.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): settings.json (SETTINGS_PATH) with load_settings and
+  save_settings; P5 search derived from PRIORITIES.
 - v1.5.0 (2026-11-08): move_to_trash moves a to-do to Things' Trash with
   AppleScript (task id passed as an argument) and confirms trashed = 1; the
   send-and-confirm loop takes a send step, shared by URL and AppleScript writes.
@@ -45,7 +48,18 @@ from datetime import date, datetime
 from datetime import time as dt_time  # `time` is the standard-library module used for timeouts.
 from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from priority_check import NEXT_UP_TAG, PRIORITIES, SEQUENCE_TAGS, SEQUENTIAL_TAG, Change, ProjectChange, Task
+from priority_check import (
+    DEFAULT_SETTINGS,
+    NEXT_UP_TAG,
+    PRIORITIES,
+    SEQUENCE_TAGS,
+    SEQUENTIAL_TAG,
+    Change,
+    ProjectChange,
+    Settings,
+    Task,
+    parse_settings,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE_DIR, "VERSION")
@@ -55,6 +69,7 @@ INDEX_HTML_PATH = os.path.join(BASE_DIR, "index.html")
 ORDER_PATH = os.path.join(BASE_DIR, "task_order.json")
 TOKEN_PATH = os.path.join(BASE_DIR, "auth_token.txt")
 PULLS_PATH = os.path.join(BASE_DIR, "sequence_pulls.json")
+SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
 
 # Things 3 keeps its data in this group container. Since Things 3.15 the
 # database sits in a ThingsData-XXXXX subfolder; older versions put it directly
@@ -792,6 +807,30 @@ def save_pulls(pulls: Dict[str, Pull], path: str = PULLS_PATH) -> None:
         {p: {"task": r.task, "date": r.started_on.isoformat(), "after": r.after} for p, r in pulls.items()},
         path,
     )
+
+
+# --- Settings -------------------------------------------------------------
+
+
+def load_settings(path: str = SETTINGS_PATH) -> Settings:
+    """Load the user's settings; a missing file gives the defaults.
+
+    An unreadable or invalid file is logged and the defaults are used, so a
+    damaged file never stops the rules (the defaults are Do Things' original
+    behavior).
+    """
+    if not os.path.exists(path):
+        return DEFAULT_SETTINGS
+    try:
+        return parse_settings(_load_json_object(path))
+    except ValueError as error:
+        get_logger().error("Ignoring invalid settings file %s: %s", path, error)
+        return DEFAULT_SETTINGS
+
+
+def save_settings(settings: Settings, path: str = SETTINGS_PATH) -> None:
+    """Save the user's settings."""
+    _save_json(settings.to_json(), path)
 
 
 # --- Auth token -----------------------------------------------------------

@@ -1,15 +1,17 @@
 """Read-only diagnostic for Do Things.
 
 Prints where the Things database is, whether the columns Do Things relies on
-exist, whether the P1-P4 tags exist, and every Today task with its tags,
+exist, whether the P1-P5 tags exist, the saved settings, and every Today task with its tags,
 dates, completion, project order, required priority and the change the refresh rules
 would make, plus each sequential (Sequential or Next Up) project's kind and task in progress,
 and each Today task's reminder time as stored by Things and as Do Things reads it.
 It never writes to Things or to any Do Things file.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): Prints the saved settings and plans each Today task's
+  change with them.
 - v1.5.0 (2026-11-08): Synchronized module version metadata.
 - v1.4.0 (2026-11-08): reminderTime is a required column (the task queries read it).
 - v1.3.1 (2026-11-08): Prints each Today task's reminder time, raw and decoded,
@@ -30,6 +32,7 @@ from common import (
     PROJECT_VERSION,
     find_things_db_path,
     load_pulls,
+    load_settings,
     missing_priority_tags,
     open_things_db,
     read_list,
@@ -107,6 +110,8 @@ def run() -> None:
     print(f"Database: {db_path}")
     today = today_local()
     print(f"Today (Mac time zone): {today.isoformat()}")
+    settings = load_settings()
+    print(f"Settings: {settings.to_json()}")
     with open_things_db(db_path) as conn:
         if not check_schema(conn):
             return
@@ -136,14 +141,14 @@ def run() -> None:
         print(f"- {project_tasks[0].context!r} [{label}]: {len(project_tasks)} open; {state}")
     print(f"\nToday tasks: {len(tasks)}")
     for task in tasks:
-        change = plan_refresh(task, today)
+        change = plan_refresh(task, today, settings)
         planned = describe_change(change) if change else "no change"
         print(
             f"- {task.title!r} [{task.uuid}]\n"
             f"    tags={task.tags} start={task.start_date} deadline={task.deadline} "
             f"context={task.context!r} completed={task.completed}\n"
             f"    project_rank={task.project_rank}\n"
-            f"    required={required_priority(task, today)} planned={planned}"
+            f"    required={required_priority(task, today, settings)} planned={planned}"
         )
         if task.uuid in reminders:
             print(f"    reminder: {describe_reminder(reminders[task.uuid])}")

@@ -3,14 +3,19 @@
 Serves the Do Things page at http://127.0.0.1:8765 and a small JSON API that
 reads Things, applies the priority rules, moves, reorders, edits, completes
 and reopens tasks, moves tasks to Things' Trash, resets a sequential project to one task in Today, opens
-tasks and Things' own lists in Things, and stores the Things auth token on
-first run.
+tasks and Things' own lists in Things, reads and saves the user's settings,
+and stores the Things auth token on first run.
 
 If the server is already running, starting it again just opens the page.
 
-Version: 1.5.0
+Version: 1.6.0
 
 Change log:
+- v1.6.0 (2026-11-10): GET and POST /api/settings (priority names, auto-assign
+  P1, default priority for new Today tasks, and which P tags are missing); the
+  rules use the saved settings; Today's group labels are the priority names;
+  rows in lists that mix priorities carry their priority for a named pill, and
+  P tags are never sent among a row's tags; fifth Today group (P5).
 - v1.5.0 (2026-11-08): POST /api/trash moves an open task to Things' Trash.
 - v1.4.0 (2026-11-08): Rows and the editor's When carry the reminder time
   (reminder_label, e.g. "2:30 PM"); the edit preview leaves it out when When changes.
@@ -70,23 +75,27 @@ from common import (
     read_sequence_project_tags,
     read_sequential_projects,
     read_task,
+    load_settings,
     save_order,
     save_pulls,
+    save_settings,
     save_token,
     today_local,
 )
 from priority_check import (
     PRIORITIES,
-    PRIORITY_LABELS,
     WHEN_KEYWORDS,
     Change,
+    Settings,
     Task,
     TaskEdit,
     completed_last,
+    current_priority,
     deadline_state,
     find_pulled,
     group_today,
     in_project_order,
+    parse_settings,
     plan_completion,
     plan_edit,
     plan_move,
@@ -113,8 +122,8 @@ REQUIRED_POST_HEADER = "X-Do-Things"
 MAX_BODY_BYTES = 64 * 1024
 MAX_TITLE_CHARS = 1000
 MAX_NOTES_CHARS = 20000
-# Lists whose rows show the P tags; elsewhere the list itself shows the priority.
-PRIORITY_TAG_LISTS = ("overdue",)
+# Lists whose rows show their priority as a pill; elsewhere the list itself shows it.
+PRIORITY_PILL_LISTS = ("overdue",)
 # Fields the edit view may change, all optional in a POST /api/edit "changes" object.
 EDIT_FIELDS = {"title", "notes", "when", "deadline", "priority", "tags", "list_id", "heading_id"}
 
@@ -140,22 +149,24 @@ class ApiError(Exception):
 
 
 def task_to_json(
-    task: Task, today: date, show_priority_tags: bool = True, sequence: Optional[str] = None
+    task: Task, today: date, priority_pill: bool = False, sequence: Optional[str] = None
 ) -> Dict[str, Any]:
     """Convert a Task into the JSON shape the page renders, mirroring a Things row.
 
-    Without `show_priority_tags` the P tags are left out: in Today's groups
-    and the P1-P4 searches the priority is already shown by the list itself.
+    `tags` never holds the P tags. With `priority_pill` (lists that mix
+    priorities) `priority` is the task's P tag, which the page shows as a
+    colored pill with the priority's name; elsewhere it is None, since
+    Today's groups and the P searches already show the priority.
     `sequence` ("task 2 of 5") marks a task a sequential project started; the
     page shows it after the project name.
     """
-    tags = task.tags if show_priority_tags else [t for t in task.tags if t not in PRIORITIES]
     return {
         "id": task.uuid,
         "title": task.title,
         "context": task.context,
         "sequence": sequence,
-        "tags": tags,
+        "tags": [t for t in task.tags if t not in PRIORITIES],
+        "priority": current_priority(task.tags) if priority_pill else None,
         "deadline": task.deadline.isoformat() if task.deadline else None,
         "deadline_label": deadline_label(task.deadline, today),
         "deadline_state": deadline_state(task.deadline, today),
@@ -216,7 +227,7 @@ def require_db_path() -> str:
 
 
 def apply_refresh_rules(
-    db_path: str, token: Optional[str], today: date, missing_tags: List[str]
+    db_path: str, token: Optional[str], today: date, missing_tags: List[str], settings: Settings
 ) -> bool:
     """Apply the refresh rules. Returns True if a write failed.
 
@@ -233,7 +244,7 @@ def apply_refresh_rules(
     with open_things_db(db_path) as conn:
         tasks = read_list(conn, "today", today)
     for task in tasks:
-        change = plan_refresh(task, today)
+        change = plan_refresh(task, today, settings)
         if change is not None and not apply_change(change, token, db_path):
             return True
     return False
@@ -243,7 +254,7 @@ def step_sequences(db_path: str, token: str, today: date) -> bool:
     """Start or undo the next task of each sequential project. Returns True if a write failed.
 
     Sequential and Next Up projects work the same way (a Next Up project's
-    task then gets P4 from refresh rule 3, a Sequential one's P2). A project tagged both first has Next Up removed in
+    task then gets P4 from refresh rule 3, a Sequential one's the default priority). A project tagged both first has Next Up removed in
     Things (fix_sequence_tags) and is then Sequential.
 
     Each started task is recorded (sequence_pulls.json) with the date given
@@ -345,9 +356,10 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
     db_path = require_db_path()
     token = load_token()
     today = today_local()
+    settings = load_settings()
     with open_things_db(db_path) as conn:
         missing = missing_priority_tags(conn)
-    if not RefreshPause.paused and apply_refresh_rules(db_path, token, today, missing):
+    if not RefreshPause.paused and apply_refresh_rules(db_path, token, today, missing, settings):
         RefreshPause.paused = True
         get_logger().error("Automatic updates paused until Retry: Things didn't confirm a change.")
     with open_things_db(db_path) as conn:
@@ -367,26 +379,24 @@ def list_response(name: str, hide_completed: bool = False) -> Dict[str, Any]:
         "refresh_paused": RefreshPause.paused,
         "missing_tags": missing,
         "priorities": list(PRIORITIES),
+        "priority_names": settings.names,
         "counts": counts,
     }
     if name == "today":
-        groups = group_today(tasks, kept, today)
+        groups = group_today(tasks, kept, today, settings)
         response["groups"] = [
             {
                 "priority": p,
-                "label": PRIORITY_LABELS[p],
-                "tasks": [
-                    task_to_json(t, today, show_priority_tags=False, sequence=labels.get(t.uuid))
-                    for t in groups[p]
-                ],
+                "label": settings.names[p],
+                "tasks": [task_to_json(t, today, sequence=labels.get(t.uuid)) for t in groups[p]],
             }
             for p in PRIORITIES
         ]
     else:
-        # Only Overdue mixes priorities, so only it shows the P tags.
-        shown = name in PRIORITY_TAG_LISTS
+        # Only Overdue mixes priorities, so only it shows priority pills.
+        pills = name in PRIORITY_PILL_LISTS
         response["tasks"] = [
-            task_to_json(t, today, show_priority_tags=shown, sequence=labels.get(t.uuid))
+            task_to_json(t, today, priority_pill=pills, sequence=labels.get(t.uuid))
             for t in completed_last(tasks)
         ]
     return response
@@ -440,7 +450,7 @@ def move_task(body: Dict[str, Any]) -> Dict[str, Any]:
     if priority in missing:
         # Things would silently drop the unknown tag, so the move could never be confirmed.
         raise ApiError(409, f"Create the {priority} tag in Things first (Window › Tags), then try again.")
-    if not apply_change(plan_move(task, priority, today_local()), token, db_path):
+    if not apply_change(plan_move(task, priority, today_local(), load_settings()), token, db_path):
         # Order is only recorded after Things confirms the move.
         return {"ok": False, "write_failed": True}
     save_order(update_order(load_order(), priority, ids))
@@ -505,7 +515,7 @@ def task_detail(task_id: object) -> Dict[str, Any]:
         other_tags=[t for t in task.tags if t not in PRIORITIES],  # The editor shows priority separately.
         notes=task.notes,
         when=when_json(task, today),
-        priority=required_priority(task, today),
+        priority=required_priority(task, today, load_settings()),
         list_id=task.list_id,
         heading_id=task.heading_id,
         checklist=checklist,
@@ -584,14 +594,15 @@ def parse_edit(changes: object, task: Task, options: Dict[str, list], today: dat
 
 
 def plan_edit_request(
-    body: Dict[str, Any], task: Task, db_path: str, today: date
+    body: Dict[str, Any], task: Task, db_path: str, today: date, settings: Settings
 ) -> Tuple[Optional[Change], Dict[str, list]]:
     """Validate an edit request for `task` and return (the planned change, the edit options)."""
     if task.completed:
         raise ApiError(409, "Uncheck the task before editing it.")
     with open_things_db(db_path) as conn:
         options = read_edit_options(conn)
-    return plan_edit(task, parse_edit(body.get("changes"), task, options, today), today), options
+    edit = parse_edit(body.get("changes"), task, options, today)
+    return plan_edit(task, edit, today, settings), options
 
 
 def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -608,8 +619,9 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
         raise ApiError(400, "Unknown list.")
     task, db_path, _ = load_task(body.get("id"))
     today = today_local()
-    change, options = plan_edit_request(body, task, db_path, today)
-    after = task if change is None else predict(task, change, today)
+    settings = load_settings()
+    change, options = plan_edit_request(body, task, db_path, today, settings)
+    after = task if change is None else predict(task, change, today, settings)
     if (after.start_date, after.someday) != (task.start_date, task.someday):
         # Whether Things keeps a reminder when When changes through the URL
         # scheme is unconfirmed, so the preview leaves it out rather than
@@ -626,9 +638,9 @@ def preview_edit(body: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "when": when_json(after, today),
         "deadline": after.deadline.isoformat() if after.deadline else None,
-        "priority": required_priority(after, today),
-        "row": task_to_json(after, today, show_priority_tags=name in PRIORITY_TAG_LISTS, sequence=sequence),
-        "place": place_in_list(after, name, today),
+        "priority": required_priority(after, today, settings),
+        "row": task_to_json(after, today, priority_pill=name in PRIORITY_PILL_LISTS, sequence=sequence),
+        "place": place_in_list(after, name, today, settings),
     }
 
 
@@ -636,7 +648,8 @@ def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
     """Apply an edit-view save to Things as one confirmed update."""
     task, token, db_path, missing = load_task_for_write(body.get("id"))
     today = today_local()
-    change, _ = plan_edit_request(body, task, db_path, today)
+    settings = load_settings()
+    change, _ = plan_edit_request(body, task, db_path, today, settings)
     if change is None:
         return {"ok": True}  # Nothing changed.
     blocked = [p for p in missing if change.tags is not None and p in change.tags]
@@ -646,7 +659,7 @@ def edit_task(body: Dict[str, Any]) -> Dict[str, Any]:
     if not apply_change(change, token, db_path):
         return {"ok": False, "write_failed": True}
     new_priority = body["changes"].get("priority")
-    if new_priority and new_priority != required_priority(task, today):
+    if new_priority and new_priority != required_priority(task, today, settings):
         # Put the task at the end of its new group, as a drag to the bottom would.
         order = load_order()
         ids = [i for i in order.get(new_priority, []) if i != task.uuid] + [task.uuid]
@@ -744,6 +757,26 @@ def set_token(body: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": True}
 
 
+def settings_response() -> Dict[str, Any]:
+    """Return the saved settings, the priorities and which P tags are missing in Things.
+
+    Settings shows each priority as found or missing in Things.
+    """
+    with open_things_db(require_db_path()) as conn:
+        missing = missing_priority_tags(conn)
+    return {"settings": load_settings().to_json(), "priorities": list(PRIORITIES), "missing_tags": missing}
+
+
+def update_settings(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and save the settings the page sends (the whole set), then return them as settings_response does."""
+    try:
+        settings = parse_settings(body.get("settings"))
+    except ValueError as error:
+        raise ApiError(400, str(error))
+    save_settings(settings)
+    return settings_response()
+
+
 def retry_refresh(body: Dict[str, Any]) -> Dict[str, Any]:
     """Resume automatic updates; the page's next list request tries them again.
 
@@ -765,6 +798,7 @@ POST_ROUTES = {
     "/api/order": reorder_tasks,
     "/api/open": open_task,
     "/api/show-list": show_list,
+    "/api/settings": update_settings,
     "/api/token": set_token,
 }
 
@@ -784,7 +818,7 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self) -> None:  # noqa: N802 (name required by http.server)
-        """Serve the page, the status, a task list, or one task for editing."""
+        """Serve the page, the status, a task list, the settings, or one task for editing."""
         if not self._host_allowed():
             return
         path, _, query = self.path.partition("?")
@@ -797,6 +831,8 @@ class Handler(BaseHTTPRequestHandler):
             name = params.get("name", [""])[0]
             hide_completed = params.get("hide_completed", [""])[0] == "1"
             self._run(lambda: list_response(name, hide_completed))
+        elif path == "/api/settings":
+            self._run(settings_response)
         elif path == "/api/task":
             task_id = urllib.parse.parse_qs(query).get("id", [""])[0]
             self._run(lambda: task_detail(task_id))
